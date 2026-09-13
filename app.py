@@ -507,10 +507,9 @@ def get_stock_trade_plan(symbol):
         chg_val = c0 - c1
         chg_pct = (chg_val / c1) * 100
 
-        #
-        # Ambil data 60 hari terakhir saja agar swing point sesuai dengan harga saat ini
-df_recent = df.tail(60)
-sh_list, sl_list = find_swing_points(df_recent, window=3)
+        # 1. Ambil data 60 hari terakhir saja agar swing point sesuai dengan harga saat ini
+        df_recent = df.tail(60)
+        sh_list, sl_list = find_swing_points(df_recent, window=3)
         
         # High Terdekat & Resistance Berikutnya
         valid_sh = sorted(list(set([round_to_bei_tick(x) for x in sh_list])))
@@ -519,88 +518,39 @@ sh_list, sl_list = find_swing_points(df_recent, window=3)
         valid_sl = sorted(list(set([round_to_bei_tick(x) for x in sl_list])))
         swing_low_real = valid_sl[-1] if len(valid_sl) > 0 else round_to_bei_tick(df['Low'].tail(20).min())
 
-       # 2. Ambil Base High 20 Hari Terakhir
-base_high = round_to_bei_tick(df['High'].tail(20).max())
-if clean_code == "ISAT":
-    base_high = 2490.0
+        # 2. Ambil Base High 20 Hari Terakhir
+        base_high = round_to_bei_tick(df['High'].tail(20).max())
+        if clean_code == "ISAT":
+            base_high = 2490.0
 
-# Swing Low / Support Terdekat dari 30 hari terakhir
-swing_low_real = valid_sl[-1] if len(valid_sl) > 0 else round_to_bei_tick(df['Low'].tail(20).min())
-
-# JIKA HARGA MENDEKATI BASE HIGH (Jarak <= 5%), PAKAI SKENARIO BOB
-if c0 >= (base_high * 0.95):
-    plan_type = "BUY ON BREAKOUT (BOB)"
-    breakout_point = base_high
-    
-    buy_range_low = breakout_point
-    buy_range_high = add_ticks(breakout_point, 3)
-    sl_price = subtract_ticks(breakout_point, 3)
-    
-    entry_desc = "Akumulasi bertahap (1–3 tick di atas breakout)."
-    sl_desc = "3 tick di bawah breakout point (Cut loss disiplin)."
-    
-    risk_point = buy_range_high - sl_price
-    tp1 = add_ticks(buy_range_high, int((risk_point * 2) / get_tick_size(buy_range_high)))
-    tp2_candidates = [x for x in valid_sh if x > tp1]
-    tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
-    tp3 = add_ticks(tp2, 10)
-
-# JIKA HARGA DI BAWAH BASE HIGH, PAKAI SKENARIO BOW (SEPERTI MBMA 520)
-else:
-    plan_type = "BUY ON WEAKNESS (BOW)"
-    
-    # Buy Zone di sekitar Support Terdekat (Swing Low)
-    buy_range_low = subtract_ticks(swing_low_real, 2)
-    buy_range_high = add_ticks(swing_low_real, 2)
-    sl_price = subtract_ticks(buy_range_low, 3)
-    
-    entry_desc = "Antre beli di area support dekat Swing Low."
-    sl_desc = "3 tick di bawah area support."
-    
-    tp1 = base_high # Target 1 ke Base High terdekat
-    tp2_candidates = [x for x in valid_sh if x > tp1]
-    tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
-    tp3 = add_ticks(tp2, 10)
-
-        # Tentukan Tipe Trade Plan
-        # Jika Last Price dekat dengan Breakout Level (Base High), gunakan BUY ON BREAKOUT (BOB)
-        if c0 >= (base_high * 0.94):
+        # 3. Penentuan Tipe Trade Plan (BOB vs BOW)
+        if c0 >= (base_high * 0.95):
             plan_type = "BUY ON BREAKOUT (BOB)"
             breakout_point = base_high
             
-            # Area Entry BOB: Breakout Level s/d +3 tick (Sesuai Fraksi BEI)
             buy_range_low = breakout_point
             buy_range_high = add_ticks(breakout_point, 3)
-            
-            # Stop Loss BOB: 3 tick di bawah level Breakout
             sl_price = subtract_ticks(breakout_point, 3)
             
-            # Target 1 (TP1): Risk:Reward 1:2 dari Area Beli atau High Terdekat Pertama
             risk_point = buy_range_high - sl_price
             tp1 = add_ticks(buy_range_high, int((risk_point * 2) / get_tick_size(buy_range_high)))
-            
-            # Target 2 (TP2) & Target 3 (TP3): Measured Move / High Terdekat Atas
             tp2_candidates = [x for x in valid_sh if x > tp1]
-            tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 15)
+            tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
             tp3_candidates = [x for x in valid_sh if x > tp2]
-            tp3 = tp3_candidates[0] if len(tp3_candidates) > 0 else add_ticks(tp2, 15)
-
+            tp3 = tp3_candidates[0] if len(tp3_candidates) > 0 else add_ticks(tp2, 10)
         else:
             plan_type = "BUY ON WEAKNESS (BOW)"
-            # Area Entry BOW: Di sekitar Swing Low / Support Terdekat
+            
             buy_range_low = subtract_ticks(swing_low_real, 2)
             buy_range_high = add_ticks(swing_low_real, 2)
-            
-            # Stop Loss BOW: 3 tick di bawah Support
             sl_price = subtract_ticks(buy_range_low, 3)
             
-            # Targets
             tp1 = base_high
             tp2_candidates = [x for x in valid_sh if x > tp1]
             tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
             tp3 = add_ticks(tp2, 10)
 
-        # Pastikan Semua Angka Terbaca Presisi Fraksi BEI
+        # 4. Pastikan Semua Angka Terbaca Presisi Fraksi BEI
         buy_range_low = round_to_bei_tick(buy_range_low)
         buy_range_high = round_to_bei_tick(buy_range_high)
         sl_price = round_to_bei_tick(sl_price)
@@ -669,20 +619,6 @@ else:
             "raw_entry_high": 0, "raw_tp1": 0, "raw_tp2": 0, "raw_tp3": 0,
             "risk_val": "-", "reward_val_2": "-"
         }
-
-@st.cache_data(ttl=600)
-def get_ihsg_data():
-    try:
-        ihsg_df = yf.download("^JKSE", period="5d", interval="1d", progress=False)
-        if isinstance(ihsg_df.columns, pd.MultiIndex):
-            ihsg_df.columns = ihsg_df.columns.get_level_values(0)
-        c_now = float(ihsg_df['Close'].iloc[-1])
-        c_prev = float(ihsg_df['Close'].iloc[-2])
-        change_pct = ((c_now - c_prev) / c_prev) * 100
-        return c_now, change_pct
-    except:
-        return 7000.0, 0.0
-
 # 8. Header Navigation
 col_brand, col_space, col_menu = st.columns([3, 3.7, 2.3])
 
