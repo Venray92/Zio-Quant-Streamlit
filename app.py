@@ -6,7 +6,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 1. Konfigurasi Halaman Full-Width & Dark Mode
+# 1. Konfigurasi Halaman & Compact CSS
 st.set_page_config(
     page_title="Zio - Quant",
     page_icon="📈",
@@ -14,32 +14,47 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS
 st.markdown("""
     <style>
     .block-container {
-        padding-top: 0.5rem !important;
-        padding-bottom: 1rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
+        padding-top: 0.2rem !important;
+        padding-bottom: 0.5rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
     }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* Styling Card Stat Trade Plan */
-    .tp-card {
-        background-color: #161b22;
+    /* Box Watchlist Scrollable */
+    .watchlist-box {
+        max-height: 480px;
+        overflow-y: auto;
+        padding-right: 5px;
+    }
+    
+    /* Header Ticker Card */
+    .ticker-header-card {
+        background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
         border: 1px solid #30363d;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 10px;
+        border-left: 5px solid #58a6ff;
+        padding: 8px 16px;
+        border-radius: 6px;
+        display: inline-block;
+        margin-bottom: 8px;
+    }
+    .ticker-header-text {
+        color: #58a6ff;
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        margin: 0;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # 2. Daftar Saham IDX
-SAHAM_LIST = [
+SAHAM_LIST = sorted(list(set([
     "ISAT.JK", "ACES.JK", "ADHI.JK", "ADRO.JK", "AGRO.JK", "AALI.JK", "AKRA.JK", "AMMN.JK", "AMRT.JK", "ANTM.JK",
     "APLN.JK", "ARTO.JK", "ASII.JK", "ASRI.JK", "AUTO.JK", "AVIA.JK", "BBCA.JK", "BBHI.JK", "BBNI.JK", "BBRI.JK",
     "BBTN.JK", "BCIC.JK", "BDMN.JK", "BELI.JK", "BIRD.JK", "BJBR.JK", "BJTM.JK", "BMRI.JK", "BMTR.JK", "BNGA.JK",
@@ -55,10 +70,36 @@ SAHAM_LIST = [
     "SMDR.JK", "SMGR.JK", "SMRA.JK", "SMSM.JK", "SSIA.JK", "SSMS.JK", "STAA.JK", "TAPG.JK", "TBIG.JK", "TCPI.JK",
     "TINS.JK", "TKIM.JK", "TLKM.JK", "TMAS.JK", "TOBA.JK", "TOTL.JK", "TOWR.JK", "TPIA.JK", "TSPC.JK", "UNTR.JK",
     "UNVR.JK", "WEGE.JK", "WIFI.JK", "WIKA.JK", "WINS.JK", "WOOD.JK"
-]
-SAHAM_LIST = sorted(list(set(SAHAM_LIST)))
+])))
 
-# 3. Engine Screener
+# 3. Helper Fraksi Harga BEI
+def get_tick_size(price):
+    if price < 200:
+        return 1
+    elif price < 500:
+        return 2
+    elif price < 2000:
+        return 5
+    elif price < 5000:
+        return 10
+    else:
+        return 25
+
+def subtract_ticks(price, num_ticks):
+    curr = price
+    for _ in range(num_ticks):
+        tick = get_tick_size(curr)
+        curr -= tick
+    return max(1, curr)
+
+def add_ticks(price, num_ticks):
+    curr = price
+    for _ in range(num_ticks):
+        tick = get_tick_size(curr)
+        curr += tick
+    return curr
+
+# 4. Engine Screener
 @st.cache_data(ttl=3600)
 def run_screener(tickers):
     results_gc = []
@@ -84,7 +125,6 @@ def run_screener(tickers):
             df['vol_ma20'] = df['Volume'].rolling(window=20).mean()
             vol_ma20_0 = float(df['vol_ma20'].iloc[-1])
 
-            # STOCHASTIC (10, 5, 5)
             low_min10 = df['Low'].rolling(window=10).min()
             high_max10 = df['High'].rolling(window=10).max()
             fast_k = 100 * ((df['Close'] - low_min10) / (high_max10 - low_min10))
@@ -104,7 +144,7 @@ def run_screener(tickers):
             k4, d4 = float(df['stoch_k'].iloc[-5]), float(df['stoch_d'].iloc[-5])
             psar0 = float(df['psar'].iloc[-1])
 
-            # Bullish
+            # Bullish Filter
             if k0 < 35:
                 gc_today = (k1 < d1) and (k0 >= d0)
                 gc_yesterday = (k2 < d2) and (k1 >= d1) and (k0 >= d0)
@@ -131,7 +171,7 @@ def run_screener(tickers):
                         "Type": stoch_signal["type"]
                     })
 
-            # Bearish
+            # Bearish Filter
             if k0 >= 75:
                 dc_today = (k1 > d1) and (k0 <= d0)
                 dc_yesterday = (k2 > d2) and (k1 <= d1) and (k0 <= d0)
@@ -170,22 +210,84 @@ def run_screener(tickers):
 
     return df_gc, df_dc
 
-# Ambil data statistik saham untuk Trade Plan
+# 5. Fetch Analisis Historis Saham & Rule Trade Plan
 @st.cache_data(ttl=600)
-def get_stock_details(symbol):
+def get_stock_trade_plan(symbol):
     try:
         yf_symbol = "^JKSE" if symbol == "^JKSE" else f"{symbol.replace('IDX:', '')}.JK"
-        df = yf.download(yf_symbol, period="30d", interval="1d", progress=False)
+        df = yf.download(yf_symbol, period="120d", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        c0 = float(df['Close'].iloc[-1])
-        low20 = float(df['Low'].min())
-        high20 = float(df['High'].max())
-        return c0, low20, high20
-    except:
-        return 1000.0, 950.0, 1100.0
 
-# Ambil data IHSG
+        c0 = float(df['Close'].iloc[-1])
+        o0 = float(df['Open'].iloc[-1])
+        h0 = float(df['High'].iloc[-1])
+        l0 = float(df['Low'].iloc[-1])
+        v0 = float(df['Volume'].iloc[-1])
+
+        swing_low_60 = float(df['Low'].tail(60).min())
+        swing_high_60 = float(df['High'].tail(60).max())
+        swing_high_120 = float(df['High'].max())
+        vol_ma20 = float(df['Volume'].tail(20).mean())
+
+        # Deteksi Breakdown Marubozu Merah / New Low 2 Bulan
+        is_marubozu_red = (c0 < o0) and ((o0 - c0) / (h0 - l0 + 1e-5) > 0.85) and ((c0 - l0) / (h0 - l0 + 1e-5) < 0.05)
+        is_new_low = c0 <= (swing_low_60 * 1.005)
+        is_breakdown = is_marubozu_red or is_new_low
+
+        # Position Filter: anti fiddle in the middle (50% range)
+        range_span = max(1.0, swing_high_60 - swing_low_60)
+        pos_ratio = (c0 - swing_low_60) / range_span
+
+        lh_terdekat = float(df['High'].tail(20).iloc[:-2].max()) if len(df) >= 22 else swing_high_60
+
+        if pos_ratio < 0.50:
+            plan_type = "BOW"
+            buy_range_low = swing_low_60
+            buy_range_high = min(c0, float(df['Low'].tail(5).mean()))
+            sl_price = subtract_ticks(swing_low_60, 3)
+            tp1 = lh_terdekat
+            tp2 = swing_high_60
+            max_allowed_risk = 8.0
+        else:
+            plan_type = "BOB"
+            buy_range_low = c0
+            buy_range_high = add_ticks(c0, 3)
+            sl_price = subtract_ticks(lh_terdekat, 3) if lh_terdekat < c0 else subtract_ticks(c0, 3)
+            tp1 = c0 + (swing_high_60 - swing_low_60)
+            tp2 = swing_high_120
+            max_allowed_risk = 5.0
+
+        entry_worst = buy_range_high
+        risk_pct = round(((entry_worst - sl_price) / entry_worst) * 100, 2)
+        reward_pct = round(((tp1 - entry_worst) / entry_worst) * 100, 2)
+        rr_ratio = round(reward_pct / risk_pct, 2) if risk_pct > 0 else 0
+
+        vol_spike = (v0 >= vol_ma20)
+
+        return {
+            "price": c0,
+            "plan_type": plan_type,
+            "is_breakdown": is_breakdown,
+            "buy_range": f"Rp {int(buy_range_low):,} - Rp {int(buy_range_high):,}",
+            "sl_price": int(sl_price),
+            "tp1": int(tp1),
+            "tp2": int(tp2),
+            "risk_pct": risk_pct,
+            "reward_pct": reward_pct,
+            "rr_ratio": rr_ratio,
+            "max_allowed_risk": max_allowed_risk,
+            "vol_spike": vol_spike,
+            "entry_worst": entry_worst
+        }
+    except Exception:
+        return {
+            "price": 1000.0, "plan_type": "BOW", "is_breakdown": False,
+            "buy_range": "Rp 980 - Rp 1,000", "sl_price": 950, "tp1": 1100, "tp2": 1200,
+            "risk_pct": 5.0, "reward_pct": 10.0, "rr_ratio": 2.0, "max_allowed_risk": 8.0,
+            "vol_spike": True, "entry_worst": 1000.0
+        }
+
 @st.cache_data(ttl=600)
 def get_ihsg_data():
     try:
@@ -199,14 +301,14 @@ def get_ihsg_data():
     except:
         return 7000.0, 0.0
 
-# 4. Header Bar
+# 6. Header Bar (Rapat & Ringkas)
 col_logo, col_title, col_space, col_menu = st.columns([0.3, 2.2, 4.2, 2.3])
 
 with col_logo:
-    st.markdown("<h2 style='margin: 0; padding-top: 2px;'>📈</h2>", unsafe_allow_html=True)
+    st.markdown("<h3 style='margin:0; padding-top:0px;'>📈</h3>", unsafe_allow_html=True)
 
 with col_title:
-    st.markdown("<h3 style='margin: 0; padding-top: 6px; font-size: 17px; color: #e6edf3; font-weight: 700;'>Zio - Quant</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='margin:0; padding-top:2px; font-size: 17px; color: #e6edf3; font-weight: 700;'>Zio - Quant</h3>", unsafe_allow_html=True)
 
 with col_menu:
     selected_screener = st.selectbox(
@@ -216,21 +318,24 @@ with col_menu:
         label_visibility="collapsed"
     )
 
-st.markdown("<hr style='margin-top: 5px; margin-bottom: 12px; border-color: #30363d;'>", unsafe_allow_html=True)
+st.markdown("<hr style='margin-top: 2px; margin-bottom: 8px; border-color: #30363d;'>", unsafe_allow_html=True)
 
-# Session States
+# Session States Initialization
 if 'active_ticker' not in st.session_state:
     st.session_state.active_ticker = "^JKSE"
 
 if 'view_mode' not in st.session_state:
     st.session_state.view_mode = "chart"
 
-# 5. Layout Utama
+if 'watchlist_tab' not in st.session_state:
+    st.session_state.watchlist_tab = "bull"
+
+# 7. Layout Utama
 col_left, col_right = st.columns([1, 2.2], gap="medium")
 
 # --- KIRI: WATCHLIST & SCREENER ---
 with col_left:
-    st.markdown("<p style='font-size: 12px; color: #8b949e; margin-bottom: 6px; font-weight: 600;'>MARKET INDEX & WATCHLIST</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 11px; color: #8b949e; margin-bottom: 4px; font-weight: 600; letter-spacing: 0.5px;'>MARKET INDEX & WATCHLIST</p>", unsafe_allow_html=True)
     
     ihsg_price, ihsg_chg = get_ihsg_data()
     ihsg_sign = "+" if ihsg_chg >= 0 else ""
@@ -239,17 +344,27 @@ with col_left:
         st.session_state.active_ticker = "^JKSE"
         st.rerun()
 
-    st.markdown("<div style='margin: 8px 0;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin: 4px 0;'></div>", unsafe_allow_html=True)
 
     if selected_screener == "Stoch - Psar":
-        st.markdown("<p style='font-size: 12px; color: #58a6ff; font-weight: bold; margin-bottom: 4px;'>⚡ SCREENER: STOCH (10,5,5) - PSAR</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 12px; color: #58a6ff; font-weight: bold; margin-bottom: 6px;'>Screener</p>", unsafe_allow_html=True)
         
         with st.spinner("Memindai pasar..."):
             df_bull, df_bear = run_screener(SAHAM_LIST)
             
-        tab_bull, tab_bear = st.tabs(["🟢 Bullish", "🔴 Bearish"])
-        
-        with tab_bull:
+        # Simetris Toggle Button Kiri & Kanan
+        btn_c1, btn_c2 = st.columns(2)
+        with btn_c1:
+            if st.button("🟢 Bullish", use_container_width=True, type="primary" if st.session_state.watchlist_tab == "bull" else "secondary"):
+                st.session_state.watchlist_tab = "bull"
+                st.rerun()
+        with btn_c2:
+            if st.button("🔴 Bearish", use_container_width=True, type="primary" if st.session_state.watchlist_tab == "bear" else "secondary"):
+                st.session_state.watchlist_tab = "bear"
+                st.rerun()
+
+        st.markdown("<div class='watchlist-box'>", unsafe_allow_html=True)
+        if st.session_state.watchlist_tab == "bull":
             if not df_bull.empty:
                 for index, row in df_bull.iterrows():
                     t_code = row["Ticker"]
@@ -260,8 +375,7 @@ with col_left:
                         st.rerun()
             else:
                 st.info("Tidak ada saham Bullish.")
-                
-        with tab_bear:
+        else:
             if not df_bear.empty:
                 for index, row in df_bear.iterrows():
                     t_code = row["Ticker"]
@@ -272,6 +386,7 @@ with col_left:
                         st.rerun()
             else:
                 st.info("Tidak ada saham Bearish.")
+        st.markdown("</div>", unsafe_allow_html=True)
     else:
         st.markdown("<p style='font-size: 12px; color: #8b949e; font-style: italic;'>Pilih menu **Stoch - Psar** di kanan atas untuk menampilkan hasil screening.</p>", unsafe_allow_html=True)
 
@@ -280,25 +395,29 @@ with col_right:
     active_symbol = st.session_state.active_ticker
     clean_ticker = "IHSG" if active_symbol == "^JKSE" else active_symbol.replace("IDX:", "")
     
-    # Tombol Switcher: Chart vs Trade Plan
+    # Custom Styled Header Ticker & Switcher
     c_title, c_b1, c_b2 = st.columns([2.5, 1, 1])
     with c_title:
-        st.markdown(f"<p style='font-size: 16px; font-weight: bold; color: #58a6ff; margin: 0;'>{clean_ticker}</p>", unsafe_allow_html=True)
+        st.markdown(f"""
+            <div class="ticker-header-card">
+                <p class="ticker-header-text">Ticker : {clean_ticker}</p>
+            </div>
+        """, unsafe_allow_html=True)
     with c_b1:
-        if st.button("📈 Chart", use_container_width=True):
+        if st.button("📈 Chart", use_container_width=True, type="primary" if st.session_state.view_mode == "chart" else "secondary"):
             st.session_state.view_mode = "chart"
             st.rerun()
     with c_b2:
-        if st.button("📋 Trade Plan", use_container_width=True):
+        if st.button("📋 Trade Plan", use_container_width=True, type="primary" if st.session_state.view_mode == "trade_plan" else "secondary"):
             st.session_state.view_mode = "trade_plan"
             st.rerun()
 
-    st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom: 4px;'></div>", unsafe_allow_html=True)
 
-    # TAMPILAN 1: CHART TRADINGVIEW BERSIH (TANPA INDIKATOR DEFAULT, ADA DRAWING TOOLS)
+    # VIEW 1: CHART TRADINGVIEW BERSIH (TANPA INDIKATOR DEFAULT)
     if st.session_state.view_mode == "chart":
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:600px;width:100%">
+        <div class="tradingview-widget-container" style="height:590px;width:100%">
           <div id="tradingview_widget" style="height:100%;width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -323,45 +442,62 @@ with col_right:
           </script>
         </div>
         """
-        st.components.v1.html(tradingview_html, height=610)
+        st.components.v1.html(tradingview_html, height=600)
 
-    # TAMPILAN 2: HALAMAN TRADE PLAN DINAMIS
+    # VIEW 2: TRADE PLAN ATURAN MUTLAK
     elif st.session_state.view_mode == "trade_plan":
-        c_price, supp_low, res_high = get_stock_details(active_symbol)
+        tp = get_stock_trade_plan(active_symbol)
         
-        # Kalkulasi Trade Plan
-        entry_price = c_price
-        stop_loss = int(supp_low * 0.98) # Support - 2%
-        target_profit = int(entry_price + (entry_price - stop_loss) * 2) # Risk/Reward 1:2
+        st.markdown(f"#### 📋 Modul Trade Plan — `{clean_ticker}`")
         
-        risk_pct = round(((entry_price - stop_loss) / entry_price) * 100, 2)
-        reward_pct = round(((target_profit - entry_price) / entry_price) * 100, 2)
-        rr_ratio = round(reward_pct / risk_pct, 2) if risk_pct > 0 else 0
+        # Rule Penolakan: Breakdown Support
+        if tp["is_breakdown"]:
+            st.error("⛔ **RULE PENOLAKAN SYSTEM:** Saham Breakdown Support (Candle Marubozu Merah / New Low 2 Bulan). Status: **SKIP / WAIT AND SEE** sampai membentuk Swing Low baru.")
+        
+        # Validasi Risk & Risk-to-Reward Ratio
+        is_rr_valid = tp["rr_ratio"] >= 2.0
+        is_risk_valid = tp["risk_pct"] <= tp["max_allowed_risk"]
 
-        st.markdown(f"#### 📋 Trade Plan Kalkulator — `{clean_ticker}`")
-        st.markdown("---")
-        
+        if not is_rr_valid:
+            st.warning("⚠️ **TIDAK SESUAI R:R (SKIP):** Risk to Reward kurang dari 1 : 2.")
+        if not is_risk_valid:
+            st.warning(f"⚠️ **RISK OVER LIMIT:** Toleransi Risiko ({tp['risk_pct']}%) melebihi batas maksimal {tp['plan_type']} ({tp['max_allowed_risk']}%).")
+
         col_tp1, col_tp2, col_tp3 = st.columns(3)
         with col_tp1:
-            st.metric("Harga Saat Ini (Entry)", f"Rp {int(entry_price):,}")
-            st.metric("Risk / Loss (%)", f"-{risk_pct}%")
+            st.metric("Strategi Plan", tp["plan_type"])
+            st.metric("Area Beli (Buy Range)", tp["buy_range"])
+            st.metric("Risk (%)", f"{tp['risk_pct']}%", delta="Sesuai Rule" if is_risk_valid else "Over Limit", delta_color="normal" if is_risk_valid else "inverse")
+
         with col_tp2:
-            st.metric("Stop Loss (Cut Loss)", f"Rp {stop_loss:,}", delta=f"-{risk_pct}%", delta_color="inverse")
-            st.metric("Reward / Gain (%)", f"+{reward_pct}%")
+            st.metric("Stop Loss (3 Ticks Low)", f"Rp {tp['sl_price']:,}")
+            st.metric("Target Profit 1 (TP1)", f"Rp {tp['tp1']:,}")
+            st.metric("Reward (%)", f"+{tp['reward_pct']}%")
+
         with col_tp3:
-            st.metric("Target Profit (TP)", f"Rp {target_profit:,}", delta=f"+{reward_pct}%")
-            st.metric("Risk to Reward Ratio", f"1 : {rr_ratio}")
+            st.metric("Target Profit 2 (TP2)", f"Rp {tp['tp2']:,}")
+            st.metric("Risk to Reward Ratio", f"1 : {tp['rr_ratio']}")
+            st.metric("Status Feasibility", "PASS (VALID)" if (is_rr_valid and is_risk_valid and not tp['is_breakdown']) else "REJECT (SKIP)")
 
         st.markdown("---")
-        st.markdown("##### 💡 Simulasi Alokasi Modal Trading")
-        modal = st.number_input("Masukkan Modal Trading (Rp):", min_value=1_000_000, value=10_000_000, step=1_000_000)
         
+        # Catatan Manajemen Porsi
+        if tp["plan_type"] == "BOW":
+            st.info("💡 **Manajemen Porsi BOW:** Entry 50% porsi di area support. Tambah 50% porsi saat konfirmasi CHoCH Bullish (Daily Close di atas LH terdekat).")
+        else:
+            st.info("💡 **Manajemen Porsi BOB:** Syarat trigger Candle Close di atas LH terdekat + Volume Spike. Max chasing +1 s.d. +3 ticks dari breakout point.")
+
+        # Simulasi Alokasi Modal
+        st.markdown("##### 💵 Simulasi Alokasi Modal Trading")
+        modal = st.number_input("Masukkan Total Capital / Modal (Rp):", min_value=1_000_000, value=10_000_000, step=1_000_000)
+        
+        entry_price = tp["entry_worst"]
         total_lot = int(modal // (entry_price * 100))
         total_buy = total_lot * entry_price * 100
-        max_loss_rp = total_lot * 100 * (entry_price - stop_loss)
-        max_gain_rp = total_lot * 100 * (target_profit - entry_price)
+        max_loss_rp = total_lot * 100 * (entry_price - tp["sl_price"])
+        max_gain_rp = total_lot * 100 * (tp["tp1"] - entry_price)
 
         c_m1, c_m2, c_m3 = st.columns(3)
         c_m1.info(f"**Maksimal Pembelian:**\n\n**{total_lot} Lot** (Rp {int(total_buy):,})")
-        c_m2.error(f"**Maksimal Risiko (Loss):**\n\n- Rp {int(max_loss_rp):,}")
-        c_m3.success(f"**Potensi Profit (Gain):**\n\n+ Rp {int(max_gain_rp):,}")
+        c_m2.error(f"**Maksimal Risiko (Loss SL):**\n\n- Rp {int(max_loss_rp):,}")
+        c_m3.success(f"**Potensi Profit (TP1):**\n\n+ Rp {int(max_gain_rp):,}")
