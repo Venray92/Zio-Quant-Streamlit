@@ -69,7 +69,6 @@ st.markdown("""
         color: #00E676 !important;
     }
 
-    /* Styling khusus tombol Brand Link Home */
     div.stButton > button.brand-btn {
         background: transparent !important;
         border: none !important;
@@ -86,7 +85,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Inisialisasi Session State
+# 2. Inisialisasi Session State & Reset Function
 def reset_to_default():
     st.session_state.active_ticker = "IDX:COMPOSITE"
     st.session_state.view_mode = "chart"
@@ -266,18 +265,41 @@ def get_tick_size(price):
     else: return 25
 
 def subtract_ticks(price, num_ticks):
-    curr = price
+    curr = float(price)
     for _ in range(num_ticks):
         curr -= get_tick_size(curr)
-    return max(1, curr)
+    return max(1.0, curr)
 
 def add_ticks(price, num_ticks):
-    curr = price
+    curr = float(price)
     for _ in range(num_ticks):
         curr += get_tick_size(curr)
     return curr
 
-# 5. Engine Screener
+# 5. Helper Deteksi Reversal / Swing Structural (Fractal Peak & Trough)
+def find_swing_points(df, window=4):
+    """Mencari Swing High dan Swing Low nyata berdasarkan titik puncak/lembah lokal."""
+    swing_highs = []
+    swing_lows = []
+    
+    highs = df['High'].values
+    lows = df['Low'].values
+    n = len(df)
+    
+    for i in range(window, n - window):
+        # Peak / Swing High
+        if all(highs[i] > highs[i - j] for j in range(1, window + 1)) and \
+           all(highs[i] >= highs[i + j] for j in range(1, window + 1)):
+            swing_highs.append(highs[i])
+            
+        # Trough / Swing Low
+        if all(lows[i] < lows[i - j] for j in range(1, window + 1)) and \
+           all(lows[i] <= lows[i + j] for j in range(1, window + 1)):
+            swing_lows.append(lows[i])
+            
+    return swing_highs, swing_lows
+
+# 6. Engine Screener
 @st.cache_data(ttl=3600)
 def run_screener(tickers):
     results_gc = []
@@ -390,7 +412,7 @@ def run_screener(tickers):
     if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
-# 6. Trade Plan Engine Berdasarkan Kedekatan Swing Low vs Swing High
+# 7. Trade Plan Engine (Presisi Struktur Support & Resistance Real)
 @st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
     if symbol in ["^JKSE", "IDX:COMPOSITE"]:
@@ -399,11 +421,12 @@ def get_stock_trade_plan(symbol):
             "buy_range": "-", "sl_price": "-", "tp1": "-", "tp2": "-", "tp3": "-",
             "risk_pct": "-", "reward_pct_1": "-", "reward_pct_2": "-", "reward_pct_3": "-",
             "rr_1": 0, "rr_2": 0, "rr_3": 0, "max_allowed_risk": 0,
-            "vol_spike": False, "entry_worst": 0, "technical_score": 50
+            "vol_spike": False, "entry_worst": 0, "technical_score": 50,
+            "bow_range": "-", "bow_sl": "-", "bob_range": "-", "bob_sl": "-"
         }
     try:
         yf_symbol = f"{symbol.replace('IDX:', '')}.JK"
-        df = yf.download(yf_symbol, period="120d", interval="1d", progress=False)
+        df = yf.download(yf_symbol, period="180d", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -413,41 +436,59 @@ def get_stock_trade_plan(symbol):
         l0 = float(df['Low'].iloc[-1])
         v0 = float(df['Volume'].iloc[-1])
 
-        swing_low = float(df['Low'].tail(60).min())
-        swing_high_60 = float(df['High'].tail(60).max())
-        swing_high_120 = float(df['High'].max())
-
-        unique_highs = sorted(list(set(df['High'].tail(60))))
-        tp_candidates = [h for h in unique_highs if h > c0]
+        # 1. Deteksi Swing Points Nyata (Structural Fractalling)
+        sh_list, sl_list = find_swing_points(df, window=4)
         
-        if len(tp_candidates) >= 3:
-            tp1, tp2, tp3 = tp_candidates[0], tp_candidates[1], tp_candidates[2]
-        elif len(tp_candidates) == 2:
-            tp1, tp2, tp3 = tp_candidates[0], tp_candidates[1], swing_high_120
-        elif len(tp_candidates) == 1:
-            tp1, tp2, tp3 = tp_candidates[0], swing_high_60, swing_high_120
+        # Cari Swing High yang valid di atas harga Close saat ini
+        valid_sh = sorted([x for x in set(sh_list) if x > c0])
+        if len(valid_sh) < 3:
+            # Fallback jika tidak cukup fractal high
+            max_h = float(df['High'].max())
+            step = (max_h - c0) / 3 if max_h > c0 else c0 * 0.05
+            tp1 = valid_sh[0] if len(valid_sh) >= 1 else add_ticks(c0, 5)
+            tp2 = valid_sh[1] if len(valid_sh) >= 2 else add_ticks(tp1, 5)
+            tp3 = max_h if max_h > tp2 else add_ticks(tp2, 5)
         else:
-            tp1, tp2, tp3 = swing_high_60, swing_high_120, swing_high_120 * 1.05
+            tp1, tp2, tp3 = valid_sh[0], valid_sh[1], valid_sh[2]
 
-        is_marubozu_red = (c0 < o0) and ((o0 - c0) / (h0 - l0 + 1e-5) > 0.85) and ((c0 - l0) / (h0 - l0 + 1e-5) < 0.05)
-        is_new_low = c0 <= (swing_low * 1.005)
-        is_breakdown = is_marubozu_red or is_new_low
+        # Cari Swing Low utama (Support Terdekat di bawah Close)
+        valid_sl = sorted([x for x in set(sl_list) if x <= c0])
+        swing_low_real = valid_sl[-1] if len(valid_sl) > 0 else float(df['Low'].tail(30).min())
 
-        dist_to_low = c0 - swing_low
-        dist_to_high = tp1 - c0
+        # 2. Penentuan Tipe Trade Plan Berdasarkan Kedekatan Posisi
+        dist_to_low = abs(c0 - swing_low_real)
+        dist_to_high = abs(tp1 - c0)
 
         if dist_to_low <= dist_to_high:
             plan_type = "BUY ON WEAKNESS (BOW)"
-            buy_range_low = swing_low
-            buy_range_high = min(c0, float(df['Low'].tail(5).mean()))
-            sl_price = subtract_ticks(swing_low, 3)
-            max_allowed_risk = 8.0
         else:
             plan_type = "BUY ON BREAKOUT (BOB)"
-            buy_range_low = c0
-            buy_range_high = add_ticks(c0, 3)
-            sl_price = subtract_ticks(tp1, 3) if tp1 > c0 else subtract_ticks(c0, 3)
-            max_allowed_risk = 5.0
+
+        # 3. Formulasi Parameter BOW & BOB yang Presisi
+        # Area BOW: Range sekitar Swing Low
+        bow_range_low = subtract_ticks(swing_low_real, 3)
+        bow_range_high = add_ticks(swing_low_real, 3)
+        bow_sl_price = subtract_ticks(bow_range_low, 3)
+
+        # Area BOB: Saat Breakout Swing High 1 (TP1)
+        bob_range_low = tp1
+        bob_range_high = add_ticks(tp1, 3)
+        bob_sl_price = subtract_ticks(tp1, 3)
+
+        # Gunakan parameter sesuai rekomendasi setup utama
+        if "WEAKNESS" in plan_type:
+            buy_range_low = bow_range_low
+            buy_range_high = bow_range_high
+            sl_price = bow_sl_price
+        else:
+            buy_range_low = bob_range_low
+            buy_range_high = bob_range_high
+            sl_price = bob_sl_price
+
+        # Deteksi Reversal/Breakdown Parah
+        is_marubozu_red = (c0 < o0) and ((o0 - c0) / (h0 - l0 + 1e-5) > 0.85) and ((c0 - l0) / (h0 - l0 + 1e-5) < 0.05)
+        is_new_low = c0 <= (swing_low_real * 0.98)
+        is_breakdown = is_marubozu_red or is_new_low
 
         entry_worst = buy_range_high
         risk_pct = round(((entry_worst - sl_price) / entry_worst) * 100, 2)
@@ -479,19 +520,20 @@ def get_stock_trade_plan(symbol):
             "rr_1": rr_1,
             "rr_2": rr_2,
             "rr_3": rr_3,
-            "max_allowed_risk": max_allowed_risk,
             "vol_spike": (v0 >= vol_ma20),
             "entry_worst": entry_worst,
-            "raw_risk_pct": risk_pct,
-            "technical_score": 85 if not is_breakdown else 40
+            "bow_range": f"Rp {int(bow_range_low):,} – Rp {int(bow_range_high):,}",
+            "bow_sl": f"Rp {int(bow_sl_price):,}",
+            "bob_range": f"Rp {int(bob_range_low):,} – Rp {int(bob_range_high):,}",
+            "bob_sl": f"Rp {int(bob_sl_price):,}"
         }
-    except Exception:
+    except Exception as e:
         return {
             "is_ihsg": False, "price": "-", "plan_type": "-", "is_breakdown": False,
             "buy_range": "-", "sl_price": "-", "tp1": "-", "tp2": "-", "tp3": "-",
             "risk_pct": "-", "reward_pct_1": "-", "reward_pct_2": "-", "reward_pct_3": "-",
-            "rr_1": 0, "rr_2": 0, "rr_3": 0, "max_allowed_risk": 0,
-            "vol_spike": False, "entry_worst": 0, "raw_risk_pct": 0, "technical_score": 50
+            "rr_1": 0, "rr_2": 0, "rr_3": 0, "vol_spike": False, "entry_worst": 0,
+            "bow_range": "-", "bow_sl": "-", "bob_range": "-", "bob_sl": "-"
         }
 
 @st.cache_data(ttl=600)
@@ -507,7 +549,7 @@ def get_ihsg_data():
     except:
         return 7000.0, 0.0
 
-# 7. Header Navigation (Logo + Title Home Button Link)
+# 8. Header Navigation
 col_brand, col_space, col_menu = st.columns([3, 3.7, 2.3])
 
 with col_brand:
@@ -525,7 +567,7 @@ with col_menu:
 
 st.markdown("<hr style='margin-top: 2px; margin-bottom: 6px; border-color: #1E2D3D;'>", unsafe_allow_html=True)
 
-# 8. Layout Utama (2 Kolom)
+# 9. Layout Utama (2 Kolom)
 col_left, col_right = st.columns([1, 2.2], gap="medium")
 
 # --- KIRI: MARKET INDEX & LIST SAHAM ---
@@ -602,7 +644,6 @@ with col_right:
     clean_ticker = "IHSG" if active_symbol in ["^JKSE", "IDX:COMPOSITE"] else active_symbol.replace("IDX:", "")
     tv_symbol = "IDX:COMPOSITE" if active_symbol in ["^JKSE", "IDX:COMPOSITE"] else active_symbol
 
-    # Ambil nama perusahaan dari dictionary
     company_name = NAMA_PERUSAHAAN.get(clean_ticker, "Indeks Harga Saham Gabungan (Composite Index)" if clean_ticker == "IHSG" else clean_ticker)
 
     c_title, c_b1, c_b2 = st.columns([2.5, 1, 1])
@@ -654,7 +695,7 @@ with col_right:
         """
         st.components.v1.html(tradingview_html, height=540)
 
-    # VIEW 2: TRADE PLAN MODUL
+    # VIEW 2: TRADE PLAN MODUL (TERPERBARUI DENAGAN LOGIKA STRUCTURAL PRESI)
     elif st.session_state.view_mode == "trade_plan":
         tp = get_stock_trade_plan(active_symbol)
         
@@ -683,25 +724,24 @@ with col_right:
 
             st.markdown(f"""
                 <div style="background: #121E2B; border: 1px solid #243447; padding: 10px 14px; border-radius: 8px; margin-top: 8px;">
-                    <p style="color: #64748B; font-size: 11px; margin: 0;">Rekomendasi Tipe Beli (Setup Aktif)</p>
+                    <p style="color: #64748B; font-size: 11px; margin: 0;">Rekomendasi Setup Utama (Posisi Terdekat)</p>
                     <p style="color: #00E676; font-size: 14px; font-weight: bold; margin: 2px 0;">⚡ {tp['plan_type']}</p>
-                    <p style="color: #94A3B8; font-size: 11px; margin: 0;">Ditentukan berdasarkan kedekatan harga close ke Swing Low / Swing High</p>
                 </div>
             """, unsafe_allow_html=True)
 
             if tp["is_breakdown"]:
-                st.error("⛔ **RULE PENOLAKAN:** Saham Breakdown Support (Marubozu Merah / New Low 2 Bulan). Status: **SKIP / WAIT AND SEE**.")
+                st.error("⛔ **RULE PENOLAKAN:** Saham Breakdown Support (Marubozu Merah / New Low). Status: **SKIP / WAIT AND SEE**.")
 
             # Bagian 2: Trading Plan Detail
-            st.markdown("##### 🔵 **2. TRADING PLAN DETAIL**")
+            st.markdown("##### 🔵 **2. TRADING PLAN DETAIL (REKOMENDASI SETUP)**")
             
             d1, d2 = st.columns(2)
             with d1:
                 st.markdown(f"""
                     <div style="background: #121E2B; border: 1px solid #1E3A2F; padding: 12px; border-radius: 8px; margin-bottom: 8px;">
-                        <p style="color: #00E676; font-size: 11px; font-weight: bold; margin: 0;">🟢 AREA ENTRY (BUY ZONE)</p>
+                        <p style="color: #00E676; font-size: 11px; font-weight: bold; margin: 0;">🟢 AREA ENTRY ({tp['plan_type']})</p>
                         <h4 style="color: #E2E8F0; margin: 4px 0;">{tp['buy_range']}</h4>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Akumulasi di support / breakout point.</p>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Area eksekusi beli presisi sesuai struktur Swing.</p>
                     </div>
                 """, unsafe_allow_html=True)
             with d2:
@@ -709,15 +749,25 @@ with col_right:
                     <div style="background: #121E2B; border: 1px solid #3A1E1E; padding: 12px; border-radius: 8px; margin-bottom: 8px;">
                         <p style="color: #FF5252; font-size: 11px; font-weight: bold; margin: 0;">🛑 STOP LOSS ({tp['risk_pct']})</p>
                         <h4 style="color: #E2E8F0; margin: 4px 0;">{tp['sl_price']}</h4>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Cut loss disiplin bila closing di bawah level ini.</p>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Cut loss disiplin jika closing menembus level ini.</p>
                     </div>
                 """, unsafe_allow_html=True)
 
+            # Referensi Lengkap Pembagian Parameter Parameter BOW vs BOB
+            st.markdown("<p style='font-size: 11px; color: #64748B; font-weight: bold; margin-top: 4px; margin-bottom: 4px;'>PARAMETER LENGKAP STRATEGI (BOW & BOB):</p>", unsafe_allow_html=True)
+            ref_col1, ref_col2 = st.columns(2)
+            with ref_col1:
+                st.caption(f"📉 **Buy On Weakness (BOW)**:\nArea Beli: **{tp['bow_range']}** | SL: **{tp['bow_sl']}**")
+            with ref_col2:
+                st.caption(f"🚀 **Buy On Breakout (BOB)**:\nArea Beli: **{tp['bob_range']}** | SL: **{tp['bob_sl']}**")
+
+            # Target Resistance Swing High (TP)
+            st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
             t1, t2, t3 = st.columns(3)
             with t1:
                 st.markdown(f"""
                     <div style="background: #121E2B; border: 1px solid #243447; padding: 10px; border-radius: 8px;">
-                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 1 (Terdekat 1) | +{tp['reward_pct_1']}</p>
+                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 1 (Swing High 1) | +{tp['reward_pct_1']}</p>
                         <h5 style="color: #E2E8F0; margin: 2px 0;">{tp['tp1']}</h5>
                         <p style="color: #94A3B8; font-size: 9px; margin: 0;">Target profit pertama.</p>
                     </div>
@@ -725,7 +775,7 @@ with col_right:
             with t2:
                 st.markdown(f"""
                     <div style="background: #121E2B; border: 1px solid #243447; padding: 10px; border-radius: 8px;">
-                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 2 (Terdekat 2) | +{tp['reward_pct_2']}</p>
+                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 2 (Swing High 2) | +{tp['reward_pct_2']}</p>
                         <h5 style="color: #E2E8F0; margin: 2px 0;">{tp['tp2']}</h5>
                         <p style="color: #94A3B8; font-size: 9px; margin: 0;">Target profit kedua.</p>
                     </div>
@@ -733,7 +783,7 @@ with col_right:
             with t3:
                 st.markdown(f"""
                     <div style="background: #121E2B; border: 1px solid #243447; padding: 10px; border-radius: 8px;">
-                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 3 (Terdekat 3) | +{tp['reward_pct_3']}</p>
+                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 3 (Swing High 3) | +{tp['reward_pct_3']}</p>
                         <h5 style="color: #E2E8F0; margin: 2px 0;">{tp['tp3']}</h5>
                         <p style="color: #94A3B8; font-size: 9px; margin: 0;">Target runner profit.</p>
                     </div>
