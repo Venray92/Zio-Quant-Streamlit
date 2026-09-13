@@ -6,7 +6,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 1. Konfigurasi Halaman & Custom Theme Stabil
+# 1. Konfigurasi Halaman & Custom Theme
 st.set_page_config(
     page_title="Zio - Quant",
     page_icon="📈",
@@ -32,13 +32,6 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-    
-    /* Box Watchlist dengan Tinggi Pas & Scroll Internal */
-    .watchlist-box {
-        height: 495px !important;
-        overflow-y: auto !important;
-        padding-right: 5px;
-    }
     
     /* Header Ticker Card Sesuai Warna Logo */
     .ticker-header-card {
@@ -77,7 +70,20 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Daftar Saham IDX
+# 2. Inisialisasi Session State (Agar Terkontrol Saat Refresh/Home)
+if 'active_ticker' not in st.session_state:
+    st.session_state.active_ticker = "IDX:COMPOSITE"
+
+if 'view_mode' not in st.session_state:
+    st.session_state.view_mode = "chart"
+
+if 'watchlist_tab' not in st.session_state:
+    st.session_state.watchlist_tab = "bull"
+
+if 'screener_choice' not in st.session_state:
+    st.session_state.screener_choice = "-- Pilih Screener --"
+
+# 3. Daftar Saham IDX
 SAHAM_LIST = sorted(list(set([
     "ISAT.JK", "ACES.JK", "ADHI.JK", "ADRO.JK", "AGRO.JK", "AALI.JK", "AKRA.JK", "AMMN.JK", "AMRT.JK", "ANTM.JK",
     "APLN.JK", "ARTO.JK", "ASII.JK", "ASRI.JK", "AUTO.JK", "AVIA.JK", "BBCA.JK", "BBHI.JK", "BBNI.JK", "BBRI.JK",
@@ -96,44 +102,35 @@ SAHAM_LIST = sorted(list(set([
     "UNVR.JK", "WEGE.JK", "WIFI.JK", "WIKA.JK", "WINS.JK", "WOOD.JK"
 ])))
 
-# 3. Helper Fraksi Harga BEI
+# 4. Helper Fraksi Harga BEI
 def get_tick_size(price):
-    if price < 200:
-        return 1
-    elif price < 500:
-        return 2
-    elif price < 2000:
-        return 5
-    elif price < 5000:
-        return 10
-    else:
-        return 25
+    if price < 200: return 1
+    elif price < 500: return 2
+    elif price < 2000: return 5
+    elif price < 5000: return 10
+    else: return 25
 
 def subtract_ticks(price, num_ticks):
     curr = price
     for _ in range(num_ticks):
-        tick = get_tick_size(curr)
-        curr -= tick
+        curr -= get_tick_size(curr)
     return max(1, curr)
 
 def add_ticks(price, num_ticks):
     curr = price
     for _ in range(num_ticks):
-        tick = get_tick_size(curr)
-        curr += tick
+        curr += get_tick_size(curr)
     return curr
 
-# 4. Engine Screener
+# 5. Engine Screener
 @st.cache_data(ttl=3600)
 def run_screener(tickers):
     results_gc = []
     results_dc = []
-    
     for ticker in tickers:
         try:
             df = yf.download(ticker, period="90d", interval="1d", progress=False)
-            if df.empty or len(df) < 30:
-                continue
+            if df.empty or len(df) < 30: continue
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
 
@@ -143,8 +140,7 @@ def run_screener(tickers):
             h0 = float(df['High'].iloc[-1])
             val0 = c0 * v0
 
-            if c0 <= 50 or val0 < 1_000_000_000:
-                continue
+            if c0 <= 50 or val0 < 1_000_000_000: continue
 
             df['vol_ma20'] = df['Volume'].rolling(window=20).mean()
             vol_ma20_0 = float(df['vol_ma20'].iloc[-1])
@@ -187,13 +183,7 @@ def run_screener(tickers):
                     score = stoch_signal["score"]
                     if psar0 < l0: score += 20
                     if v0 > vol_ma20_0: score += 10
-
-                    results_gc.append({
-                        "Ticker": ticker.replace(".JK", ""),
-                        "Harga": int(c0),
-                        "Score": score,
-                        "Type": stoch_signal["type"]
-                    })
+                    results_gc.append({"Ticker": ticker.replace(".JK", ""), "Harga": int(c0), "Score": score, "Type": stoch_signal["type"]})
 
             # Bearish Filter
             if k0 >= 75:
@@ -214,27 +204,17 @@ def run_screener(tickers):
                     score = dc_signal["score"]
                     if psar0 > h0: score -= 20
                     if v0 > vol_ma20_0: score -= 10
-
-                    results_dc.append({
-                        "Ticker": ticker.replace(".JK", ""),
-                        "Harga": int(c0),
-                        "Score": score,
-                        "Type": dc_signal["type"]
-                    })
+                    results_dc.append({"Ticker": ticker.replace(".JK", ""), "Harga": int(c0), "Score": score, "Type": dc_signal["type"]})
         except Exception:
             continue
 
     df_gc = pd.DataFrame(results_gc)
     df_dc = pd.DataFrame(results_dc)
-
-    if not df_gc.empty:
-        df_gc = df_gc.sort_values(by="Score", ascending=False).reset_index(drop=True)
-    if not df_dc.empty:
-        df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
-
+    if not df_gc.empty: df_gc = df_gc.sort_values(by="Score", ascending=False).reset_index(drop=True)
+    if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
-# 5. Fetch Analisis Historis Saham & Rule Trade Plan
+# 6. Trade Plan Engine
 @st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
     if symbol in ["^JKSE", "IDX:COMPOSITE"]:
@@ -244,7 +224,6 @@ def get_stock_trade_plan(symbol):
             "risk_pct": "-", "reward_pct": "-", "rr_ratio": "-", "max_allowed_risk": "-",
             "vol_spike": False, "entry_worst": 0
         }
-
     try:
         yf_symbol = f"{symbol.replace('IDX:', '')}.JK"
         df = yf.download(yf_symbol, period="120d", interval="1d", progress=False)
@@ -293,8 +272,6 @@ def get_stock_trade_plan(symbol):
         reward_pct = round(((tp1 - entry_worst) / entry_worst) * 100, 2)
         rr_ratio = round(reward_pct / risk_pct, 2) if risk_pct > 0 else 0
 
-        vol_spike = (v0 >= vol_ma20)
-
         return {
             "is_ihsg": False,
             "price": f"Rp {int(c0):,}",
@@ -308,7 +285,7 @@ def get_stock_trade_plan(symbol):
             "reward_pct": f"{reward_pct}%",
             "rr_ratio": rr_ratio,
             "max_allowed_risk": max_allowed_risk,
-            "vol_spike": vol_spike,
+            "vol_spike": (v0 >= vol_ma20),
             "entry_worst": entry_worst,
             "raw_risk_pct": risk_pct
         }
@@ -333,7 +310,7 @@ def get_ihsg_data():
     except:
         return 7000.0, 0.0
 
-# 6. Header Bar (Rapat & Ringkas)
+# 7. Header Navigation
 col_logo, col_title, col_space, col_menu = st.columns([0.3, 2.2, 4.2, 2.3])
 
 with col_logo:
@@ -346,44 +323,33 @@ with col_menu:
     selected_screener = st.selectbox(
         "Pilih Screener",
         ["-- Pilih Screener --", "Stoch - Psar"],
-        index=1,
+        key="screener_choice",
         label_visibility="collapsed"
     )
 
 st.markdown("<hr style='margin-top: 2px; margin-bottom: 6px; border-color: #1E2D3D;'>", unsafe_allow_html=True)
 
-# Session States Initialization
-if 'active_ticker' not in st.session_state:
-    st.session_state.active_ticker = "IDX:COMPOSITE"
-
-if 'view_mode' not in st.session_state:
-    st.session_state.view_mode = "chart"
-
-if 'watchlist_tab' not in st.session_state:
-    st.session_state.watchlist_tab = "bull"
-
-# 7. Layout Utama
+# 8. Layout Utama (2 Kolom)
 col_left, col_right = st.columns([1, 2.2], gap="medium")
 
-# --- KIRI: WATCHLIST & SCREENER ---
+# --- KIRI: MARKET INDEX & LIST SAHAM ---
 with col_left:
     st.markdown("<p style='font-size: 11px; color: #64748B; margin-bottom: 4px; font-weight: 600; letter-spacing: 0.5px;'>MARKET INDEX & WATCHLIST</p>", unsafe_allow_html=True)
     
     ihsg_price, ihsg_chg = get_ihsg_data()
     ihsg_sign = "+" if ihsg_chg >= 0 else ""
     
+    # Tombol IHSG sekaligus sebagai tombol Reset / Home
     if st.button(f"📊  **IHSG**  |  {ihsg_price:,.2f}  ({ihsg_sign}{ihsg_chg:.2f}%)", use_container_width=True):
         st.session_state.active_ticker = "IDX:COMPOSITE"
+        st.session_state.screener_choice = "-- Pilih Screener --"
         st.rerun()
 
     st.markdown("<div style='margin: 4px 0;'></div>", unsafe_allow_html=True)
 
-    if selected_screener == "Stoch - Psar":
-        st.markdown("<p style='font-size: 12px; color: #00E676; font-weight: bold; margin-bottom: 4px;'>Screener</p>", unsafe_allow_html=True)
+    if st.session_state.screener_choice == "Stoch - Psar":
+        st.markdown("<p style='font-size: 12px; color: #00E676; font-weight: bold; margin-bottom: 4px;'>Screener: Stoch - Psar</p>", unsafe_allow_html=True)
         
-        with st.spinner("Memindai pasar..."):
-            df_bull, df_bear = run_screener(SAHAM_LIST)
-            
         btn_c1, btn_c2 = st.columns(2)
         with btn_c1:
             if st.button("🟢 Bullish", use_container_width=True, type="primary" if st.session_state.watchlist_tab == "bull" else "secondary"):
@@ -394,40 +360,43 @@ with col_left:
                 st.session_state.watchlist_tab = "bear"
                 st.rerun()
 
-        st.markdown("<div class='watchlist-box'>", unsafe_allow_html=True)
-        if st.session_state.watchlist_tab == "bull":
-            if not df_bull.empty:
-                for index, row in df_bull.iterrows():
-                    t_code = row["Ticker"]
-                    t_price = row["Harga"]
-                    t_type = row["Type"]
-                    if st.button(f"🔹 **{t_code}** | {t_price:,} | *{t_type}*", key=f"bull_{t_code}", use_container_width=True):
-                        st.session_state.active_ticker = f"IDX:{t_code}"
-                        st.rerun()
-            else:
-                st.info("Tidak ada saham Bullish.")
-        else:
-            if not df_bear.empty:
-                for index, row in df_bear.iterrows():
-                    t_code = row["Ticker"]
-                    t_price = row["Harga"]
-                    t_type = row["Type"]
-                    if st.button(f"🔻 **{t_code}** | {t_price:,} | *{t_type}*", key=f"bear_{t_code}", use_container_width=True):
-                        st.session_state.active_ticker = f"IDX:{t_code}"
-                        st.rerun()
-            else:
-                st.info("Tidak ada saham Bearish.")
-        st.markdown("</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<p style='font-size: 12px; color: #64748B; font-style: italic;'>Pilih menu **Stoch - Psar** di kanan atas untuk menampilkan hasil screening.</p>", unsafe_allow_html=True)
+        with st.spinner("Memindai pasar..."):
+            df_bull, df_bear = run_screener(SAHAM_LIST)
 
-# --- KANAN: DISPLAY CHART / TRADE PLAN ---
+        # NATIVE CONTAINER STREAMLIT: Mengunci Tinggi + Scrollbar Internal Otomatis
+        with st.container(height=485):
+            if st.session_state.watchlist_tab == "bull":
+                if not df_bull.empty:
+                    for index, row in df_bull.iterrows():
+                        t_code = row["Ticker"]
+                        t_price = row["Harga"]
+                        t_type = row["Type"]
+                        if st.button(f"🔹 **{t_code}** | {t_price:,} | *{t_type}*", key=f"bull_{t_code}", use_container_width=True):
+                            st.session_state.active_ticker = f"IDX:{t_code}"
+                            st.rerun()
+                else:
+                    st.info("Tidak ada saham Bullish.")
+            else:
+                if not df_bear.empty:
+                    for index, row in df_bear.iterrows():
+                        t_code = row["Ticker"]
+                        t_price = row["Harga"]
+                        t_type = row["Type"]
+                        if st.button(f"🔻 **{t_code}** | {t_price:,} | *{t_type}*", key=f"bear_{t_code}", use_container_width=True):
+                            st.session_state.active_ticker = f"IDX:{t_code}"
+                            st.rerun()
+                else:
+                    st.info("Tidak ada saham Bearish.")
+    else:
+        st.info("Silakan pilih strategi screener pada dropdown kanan atas untuk menampilkan daftar rekomendasi saham.")
+
+# --- KANAN: CHART / TRADE PLAN ---
 with col_right:
     active_symbol = st.session_state.active_ticker
     clean_ticker = "IHSG" if active_symbol in ["^JKSE", "IDX:COMPOSITE"] else active_symbol.replace("IDX:", "")
     tv_symbol = "IDX:COMPOSITE" if active_symbol in ["^JKSE", "IDX:COMPOSITE"] else active_symbol
 
-    # Custom Header Ticker & Switcher
+    # Header Ticker & Mode Switcher
     c_title, c_b1, c_b2 = st.columns([2.5, 1, 1])
     with c_title:
         st.markdown(f"""
@@ -446,10 +415,10 @@ with col_right:
 
     st.markdown("<div style='margin-bottom: 2px;'></div>", unsafe_allow_html=True)
 
-    # VIEW 1: CHART TRADINGVIEW (Tinggi disesuaikan 500px)
+    # VIEW 1: TRADINGVIEW CHART (Sejajar sempurna dengan container kiri)
     if st.session_state.view_mode == "chart":
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:495px;width:100%">
+        <div class="tradingview-widget-container" style="height:535px;width:100%">
           <div id="tradingview_widget" style="height:100%;width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -474,9 +443,9 @@ with col_right:
           </script>
         </div>
         """
-        st.components.v1.html(tradingview_html, height=500)
+        st.components.v1.html(tradingview_html, height=540)
 
-    # VIEW 2: TRADE PLAN ATURAN MUTLAK
+    # VIEW 2: TRADE PLAN MODUL
     elif st.session_state.view_mode == "trade_plan":
         tp = get_stock_trade_plan(active_symbol)
         
