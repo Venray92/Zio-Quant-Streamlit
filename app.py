@@ -33,9 +33,9 @@ st.markdown("""
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* Box Watchlist dengan Tinggi Tetap & Scroll Internal */
+    /* Box Watchlist dengan Tinggi Pas & Scroll Internal */
     .watchlist-box {
-        height: 440px !important;
+        height: 495px !important;
         overflow-y: auto !important;
         padding-right: 5px;
     }
@@ -346,7 +346,7 @@ with col_menu:
     selected_screener = st.selectbox(
         "Pilih Screener",
         ["-- Pilih Screener --", "Stoch - Psar"],
-        index=1, # Default langsung aktif ke Stoch - Psar agar list langsung keluar
+        index=1,
         label_visibility="collapsed"
     )
 
@@ -446,10 +446,10 @@ with col_right:
 
     st.markdown("<div style='margin-bottom: 2px;'></div>", unsafe_allow_html=True)
 
-    # VIEW 1: CHART TRADINGVIEW (Aman tidak terpotong)
+    # VIEW 1: CHART TRADINGVIEW (Tinggi disesuaikan 500px)
     if st.session_state.view_mode == "chart":
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:480px;width:100%">
+        <div class="tradingview-widget-container" style="height:495px;width:100%">
           <div id="tradingview_widget" style="height:100%;width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -474,7 +474,7 @@ with col_right:
           </script>
         </div>
         """
-        st.components.v1.html(tradingview_html, height=485)
+        st.components.v1.html(tradingview_html, height=500)
 
     # VIEW 2: TRADE PLAN ATURAN MUTLAK
     elif st.session_state.view_mode == "trade_plan":
