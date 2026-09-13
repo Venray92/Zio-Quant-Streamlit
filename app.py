@@ -83,7 +83,7 @@ st.markdown("""
         opacity: 0.8;
     }
 
-    /* CUSTOM CARDS UI MATCHING SCREENSHOTS */
+    /* CUSTOM CARDS UI */
     .tp-card {
         background-color: #111A24;
         border: 1px solid #1E2D3D;
@@ -166,6 +166,20 @@ if 'watchlist_tab' not in st.session_state:
 
 if 'screener_choice' not in st.session_state:
     st.session_state.screener_choice = "-- Pilih Screener --"
+
+# Helper Data IHSG (Penambahan Fungsi yang Hilang)
+@st.cache_data(ttl=600)
+def get_ihsg_data():
+    try:
+        df_ihsg = yf.download("^JKSE", period="5d", interval="1d", progress=False)
+        if isinstance(df_ihsg.columns, pd.MultiIndex):
+            df_ihsg.columns = df_ihsg.columns.get_level_values(0)
+        c0 = float(df_ihsg['Close'].iloc[-1])
+        c1 = float(df_ihsg['Close'].iloc[-2])
+        chg_pct = ((c0 - c1) / c1) * 100
+        return c0, chg_pct
+    except Exception:
+        return 7000.0, 0.0
 
 # 3. Database Nama Lengkap Perusahaan IDX
 NAMA_PERUSAHAAN = {
@@ -319,7 +333,7 @@ NAMA_PERUSAHAAN = {
 
 SAHAM_LIST = sorted(list(set(NAMA_PERUSAHAAN.keys())))
 
-# 4. Helper Fraksi Harga BEI (Persis Aturan BEI Terbaru)
+# 4. Helper Fraksi Harga BEI
 def get_tick_size(price):
     if price < 200: return 1
     elif price < 500: return 2
@@ -328,7 +342,6 @@ def get_tick_size(price):
     else: return 25
 
 def round_to_bei_tick(price):
-    """Membulatkan angka harga secara otomatis ke kelipatan fraksi BEI terdekat."""
     tick = get_tick_size(price)
     return float(round(price / tick) * tick)
 
@@ -344,9 +357,8 @@ def subtract_ticks(price, num_ticks):
         curr -= get_tick_size(curr)
     return max(1.0, round_to_bei_tick(curr))
 
-# 5. Helper Deteksi Reversal / Swing Structural (Fractal Peak & Trough & Base)
+# 5. Helper Deteksi Reversal / Swing Structural
 def find_swing_points(df, window=4):
-    """Mencari High Terdekat, Low Terdekat, dan Base Area secara presisi."""
     swing_highs = []
     swing_lows = []
     
@@ -355,12 +367,10 @@ def find_swing_points(df, window=4):
     n = len(df)
     
     for i in range(window, n - window):
-        # Peak / Swing High
         if all(highs[i] > highs[i - j] for j in range(1, window + 1)) and \
            all(highs[i] >= highs[i + j] for j in range(1, window + 1)):
             swing_highs.append(round_to_bei_tick(highs[i]))
             
-        # Trough / Swing Low
         if all(lows[i] < lows[i - j] for j in range(1, window + 1)) and \
            all(lows[i] <= lows[i + j] for j in range(1, window + 1)):
             swing_lows.append(round_to_bei_tick(lows[i]))
@@ -480,7 +490,7 @@ def run_screener(tickers):
     if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
-# 7. Trade Plan Engine (Presisi Base, Swing Points & Auto Fraksi BEI)
+# 7. Trade Plan Engine
 @st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
     clean_code = symbol.replace('IDX:', '')
@@ -507,23 +517,17 @@ def get_stock_trade_plan(symbol):
         chg_val = c0 - c1
         chg_pct = (chg_val / c1) * 100
 
-        # 1. Ambil data 60 hari terakhir saja agar swing point sesuai dengan harga saat ini
         df_recent = df.tail(60)
         sh_list, sl_list = find_swing_points(df_recent, window=3)
         
-        # High Terdekat & Resistance Berikutnya
         valid_sh = sorted(list(set([round_to_bei_tick(x) for x in sh_list])))
-        
-        # Low Terdekat (Support)
         valid_sl = sorted(list(set([round_to_bei_tick(x) for x in sl_list])))
         swing_low_real = valid_sl[-1] if len(valid_sl) > 0 else round_to_bei_tick(df['Low'].tail(20).min())
 
-        # 2. Ambil Base High 20 Hari Terakhir
         base_high = round_to_bei_tick(df['High'].tail(20).max())
         if clean_code == "ISAT":
             base_high = 2490.0
 
-        # 3. Penentuan Tipe Trade Plan (BOB vs BOW)
         if c0 >= (base_high * 0.95):
             plan_type = "BUY ON BREAKOUT (BOB)"
             breakout_point = base_high
@@ -550,7 +554,6 @@ def get_stock_trade_plan(symbol):
             tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
             tp3 = add_ticks(tp2, 10)
 
-        # 4. Pastikan Semua Angka Terbaca Presisi Fraksi BEI
         buy_range_low = round_to_bei_tick(buy_range_low)
         buy_range_high = round_to_bei_tick(buy_range_high)
         sl_price = round_to_bei_tick(sl_price)
@@ -558,7 +561,6 @@ def get_stock_trade_plan(symbol):
         tp2 = round_to_bei_tick(tp2)
         tp3 = round_to_bei_tick(tp3)
 
-        # Deteksi Reversal / Breakdown Parah
         is_marubozu_red = (c0 < o0) and ((o0 - c0) / (h0 - l0 + 1e-5) > 0.85)
         is_new_low = c0 <= (swing_low_real * 0.97)
         is_breakdown = is_marubozu_red or is_new_low
@@ -619,6 +621,7 @@ def get_stock_trade_plan(symbol):
             "raw_entry_high": 0, "raw_tp1": 0, "raw_tp2": 0, "raw_tp3": 0,
             "risk_val": "-", "reward_val_2": "-"
         }
+
 # 8. Header Navigation
 col_brand, col_space, col_menu = st.columns([3, 3.7, 2.3])
 
@@ -765,17 +768,15 @@ with col_right:
         """
         st.components.v1.html(tradingview_html, height=540)
 
-    # VIEW 2: TRADE PLAN MODUL (TERPERBARUI DEGAN MODEL HARI INI + PRAKTIK BEI)
+    # VIEW 2: TRADE PLAN MODUL
     elif st.session_state.view_mode == "trade_plan":
         tp = get_stock_trade_plan(active_symbol)
         
         if tp["is_ihsg"]:
             st.info("ℹ️ **Indeks IHSG (Composite)** tidak memiliki Trade Plan individual. Silakan pilih salah satu saham dari watchlist sebelah kiri.")
         else:
-            # ==========================================
             # BLOCK 1: STATUS CHART
-            # ==========================================
-            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-bottom: 8px;'>🎯 1. STATUS CHART</p>", unsafe_allow_html=True)
+            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-bottom: 8px;'>🎯 1. STATUS CHART & EKSEKUSI</p>", unsafe_allow_html=True)
             
             sc1, sc2 = st.columns(2)
             with sc1:
@@ -787,157 +788,74 @@ with col_right:
                     </div>
                 """, unsafe_allow_html=True)
             with sc2:
-                chg_color = "#00E676" if tp['chg_val'] >= 0 else "#FF5252"
-                chg_sign = "+" if tp['chg_val'] >= 0 else ""
+                card_style = "tp-card-red" if tp["is_breakdown"] else "tp-card-green"
+                badge_style = "tp-badge-red" if tp["is_breakdown"] else "tp-badge-green"
+                status_text = "⚠️ HIGH RISK / BREAKDOWN" if tp["is_breakdown"] else f"🟢 {tp['plan_type']}"
+                
                 st.markdown(f"""
-                    <div class="tp-card">
-                        <p style="color: #64748B; font-size: 11px; margin: 0;">Last Price</p>
-                        <h2 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{tp['price']}</h2>
-                        <span style="color: {chg_color}; font-size: 12px; font-weight: bold;">
-                            {chg_sign}{tp['chg_pct']:.2f}% ({chg_sign}{tp['chg_val']:,.2f})
-                        </span>
+                    <div class="{card_style}">
+                        <p style="color: #64748B; font-size: 11px; margin: 0;">Rekomendasi Rencana</p>
+                        <h3 style="color: #FFFFFF; margin: 4px 0; font-weight: 700;">{tp['plan_type']}</h3>
+                        <span class="{badge_style}">{status_text}</span>
                     </div>
                 """, unsafe_allow_html=True)
 
-            # Setup Technical Status Card
-            setup_status = "SUPPORT RETEST / WEAKNESS" if "WEAKNESS" in tp['plan_type'] else "BREAKOUT ACCUMULATION"
-            score_badge = "B+" if tp['vol_spike'] else "B"
-            score_val = 75 if tp['vol_spike'] else 64
+            # BLOCK 2: PARAMETER PRICE TARGET & RISK
+            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 10px; margin-bottom: 8px;'>📊 2. HARGA & PARAMETER TRADE PLAN</p>", unsafe_allow_html=True)
             
-            st.markdown(f"""
-                <div class="tp-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <p style="color: #64748B; font-size: 11px; margin: 0;">Status Teknikal Setup</p>
-                            <p style="color: #FFB300; font-size: 15px; font-weight: 800; margin: 4px 0;">● {tp['plan_type']} ({setup_status})</p>
-                            <p style="color: #94A3B8; font-size: 11px; margin: 0;">{"Perhatikan Volume & Konfirmasi Area Beli" if not tp['is_breakdown'] else "Ditolak oleh Rule D (Breakdown / Falling Knife)"}</p>
-                        </div>
-                        <div style="text-align: right;">
-                            <span class="tp-badge-blue">{score_badge}</span>
-                            <h3 style="color: #FFFFFF; margin: 4px 0;">{score_val} <span style="font-size: 12px; color: #64748B;">/100</span></h3>
-                        </div>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            if tp["is_breakdown"]:
-                st.error("⛔ **RULE D INVALIDATION:** Saham terdeteksi Breakdown Support / Solid Red Marubozu. Status: **SKIP / DILARANG ENTRY**.")
-
-            # ==========================================
-            # BLOCK 2: TRADING PLAN DETAIL
-            # ==========================================
-            st.markdown("<p style='font-size: 13px; color: #00B0FF; font-weight: bold; margin-top: 14px; margin-bottom: 8px;'>📋 2. TRADING PLAN DETAIL</p>", unsafe_allow_html=True)
-            
-            # Row 1: Entry & Stop Loss
-            d1, d2 = st.columns(2)
-            with d1:
-                st.markdown(f"""
-                    <div class="tp-card-green">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="color: #00E676; font-size: 12px; font-weight: bold;">✔ AREA ENTRY</span>
-                            <span class="tp-badge-green">Buy Zone</span>
-                        </div>
-                        <h3 style="color: #FFFFFF; margin: 8px 0; font-weight: 800;">{tp['buy_range']}</h3>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Akumulasi bertahap (1–3 tick di atas breakout).</p>
-                    </div>
-                """, unsafe_allow_html=True)
-            with d2:
-                st.markdown(f"""
-                    <div class="tp-card-red">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="color: #FF5252; font-size: 12px; font-weight: bold;">⚠️ STOP LOSS</span>
-                            <span class="tp-badge-red">{tp['risk_pct']}</span>
-                        </div>
-                        <h3 style="color: #FF5252; margin: 8px 0; font-weight: 800;">{tp['sl_price']}</h3>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">3 tick di bawah breakout point (Cut loss disiplin).</p>
-                    </div>
-                """, unsafe_allow_html=True)
-
-            # Row 2: Target 1 & Target 2
-            t1, t2 = st.columns(2)
-            with t1:
+            pc1, pc2, pc3 = st.columns(3)
+            with pc1:
                 st.markdown(f"""
                     <div class="tp-card-blue">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="color: #00B0FF; font-size: 12px; font-weight: bold;">TARGET 1 (TP 1)</span>
-                            <span class="tp-badge-blue">{tp['reward_pct_1']}</span>
-                        </div>
-                        <h3 style="color: #FFFFFF; margin: 8px 0; font-weight: 800;">{tp['tp1']}</h3>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Resistance minor. Ambil profit sebagian (30-50%).</p>
+                        <p style="color: #00B0FF; font-size: 11px; margin: 0; font-weight: bold;">AREA BELI (ENTRY)</p>
+                        <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['buy_range']}</h3>
+                        <p style="color: #64748B; font-size: 11px; margin: 0;">Harga Terakhir: {tp['price']}</p>
                     </div>
                 """, unsafe_allow_html=True)
-            with t2:
+            
+            with pc2:
+                st.markdown(f"""
+                    <div class="tp-card-red">
+                        <p style="color: #FF5252; font-size: 11px; margin: 0; font-weight: bold;">STOP LOSS (SL)</p>
+                        <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['sl_price']}</h3>
+                        <p style="color: #FF5252; font-size: 11px; margin: 0;">Resiko: {tp['risk_pct']} ({tp['risk_val']})</p>
+                    </div>
+                """, unsafe_allow_html=True)
+
+            with pc3:
                 st.markdown(f"""
                     <div class="tp-card-green">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="color: #00E676; font-size: 12px; font-weight: bold;">TARGET 2 (TP 2)</span>
-                            <span class="tp-badge-green">{tp['reward_pct_2']}</span>
-                        </div>
-                        <h3 style="color: #00E676; margin: 8px 0; font-weight: 800;">{tp['tp2']}</h3>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Target utama swing (Resistance kuat / Measured Move).</p>
+                        <p style="color: #00E676; font-size: 11px; margin: 0; font-weight: bold;">TARGET 2 (MAIN TP)</p>
+                        <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['tp2']}</h3>
+                        <p style="color: #00E676; font-size: 11px; margin: 0;">Potensi: {tp['reward_pct_2']} (R:R {tp['rr_2']})</p>
                     </div>
                 """, unsafe_allow_html=True)
 
-            # Row 3: Target 3
-            st.markdown(f"""
-                <div class="tp-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <span style="color: #00B0FF; font-size: 12px; font-weight: bold;">TARGET 3 (TP 3 - EXTENDED)</span>
-                            <h3 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{tp['tp3']}</h3>
-                        </div>
-                        <span class="tp-badge-blue" style="font-size: 13px;">{tp['reward_pct_3']}</span>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            # Roadmap Eksekusi Harga Horizontal
-            st.markdown(f"""
-                <div class="tp-card" style="padding: 10px 14px;">
-                    <p style="color: #64748B; font-size: 11px; margin-bottom: 8px;">Roadmap Eksekusi Harga:</p>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: bold;">
-                        <span style="color: #FF5252;">● SL: {tp['raw_sl']:,} ({tp['risk_pct']})</span>
-                        <span style="color: #64748B;">➔</span>
-                        <span style="color: #00E676;">● Entry: {tp['buy_range']}</span>
-                        <span style="color: #64748B;">➔</span>
-                        <span style="color: #00B0FF;">● TP1: {tp['raw_tp1']:,} ({tp['reward_pct_1']})</span>
-                        <span style="color: #64748B;">➔</span>
-                        <span style="color: #00E676;">● TP2: {tp['raw_tp2']:,} ({tp['reward_pct_2']})</span>
-                        <span style="color: #64748B;">➔</span>
-                        <span style="color: #00B0FF;">● TP3: {tp['raw_tp3']:,} ({tp['reward_pct_3']})</span>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            # ==========================================
-            # BLOCK 3: RASIO R:R
-            # ==========================================
-            st.markdown("<p style='font-size: 13px; color: #FFD700; font-weight: bold; margin-top: 14px; margin-bottom: 8px;'>⚡ 3. RASIO R:R (RISK TO REWARD RATIO)</p>", unsafe_allow_html=True)
+            # BLOCK 3: DETAIL TARGET PENJUALAN
+            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 10px; margin-bottom: 8px;'>🎯 3. SCALING OUT TARGET (TP1, TP2, TP3)</p>", unsafe_allow_html=True)
             
-            rr_status = "Sangat Menarik" if tp['rr_2'] >= 3.0 else ("Menarik" if tp['rr_2'] >= 2.0 else "Kurang Ideal")
-            
-            st.markdown(f"""
-                <div class="tp-card" style="border: 1px solid #FFD700;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="color: #64748B; font-size: 12px; font-weight: bold;">RASIO UTAMA (KE TP 2)</span>
-                        <span class="tp-badge-gold">{rr_status}</span>
+            tc1, tc2, tc3 = st.columns(3)
+            with tc1:
+                st.markdown(f"""
+                    <div class="tp-card">
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 1 (Conservative)</p>
+                        <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp1']}</h4>
+                        <span class="tp-badge-green">{tp['reward_pct_1']} (R:R {tp['rr_1']})</span>
                     </div>
-                    <h1 style="color: #FFD700; font-size: 42px; font-weight: 900; margin: 6px 0;">1 : {tp['rr_2']}</h1>
-                    <p style="color: #E2E8F0; font-size: 12px; margin-bottom: 12px;">
-                        Setiap risiko <b>1x</b> menawarkan potensi imbal hasil <b>{tp['rr_2']}x</b> lipat ke Target 2.
-                    </p>
-                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
-                        <span style="color: #FF5252;">Resiko: {tp['risk_val']}</span>
-                        <span style="color: #00E676;">Reward: {tp['reward_val_2']}</span>
+                """, unsafe_allow_html=True)
+            with tc2:
+                st.markdown(f"""
+                    <div class="tp-card">
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 2 (Moderate)</p>
+                        <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp2']}</h4>
+                        <span class="tp-badge-green">{tp['reward_pct_2']} (R:R {tp['rr_2']})</span>
                     </div>
-                    <!-- Combined Progress Bar -->
-                    <div style="width: 100%; height: 8px; background-color: #00E676; border-radius: 4px; overflow: hidden; display: flex;">
-                        <div style="width: 30%; height: 100%; background-color: #FF5252;"></div>
-                        <div style="width: 70%; height: 100%; background-color: #00E676;"></div>
+                """, unsafe_allow_html=True)
+            with tc3:
+                st.markdown(f"""
+                    <div class="tp-card">
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 3 (Aggressive)</p>
+                        <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp3']}</h4>
+                        <span class="tp-badge-green">{tp['reward_pct_3']} (R:R {tp['rr_3']})</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 10px; color: #64748B; margin-top: 4px;">
-                        <span>Stop Loss ({tp['risk_pct']})</span>
-                        <span>Target 2 ({tp['reward_pct_2']})</span>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
