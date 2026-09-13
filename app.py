@@ -6,7 +6,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 1. Konfigurasi Halaman & Custom Theme Fit-to-Screen (Zero Window Scroll)
+# 1. Konfigurasi Halaman & Custom Theme Stabil
 st.set_page_config(
     page_title="Zio - Quant",
     page_icon="📈",
@@ -16,30 +16,26 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* Kunci layout agar halaman utama tidak memiliki scrollbar luar */
-    html, body, [data-testid="stAppViewContainer"], .stApp {
-        height: 100vh !important;
-        overflow: hidden !important;
+    /* Global Background & Text */
+    .stApp {
         background-color: #0B131D !important;
         color: #E2E8F0;
     }
     
     .block-container {
         padding-top: 0.2rem !important;
-        padding-bottom: 0.2rem !important;
+        padding-bottom: 0.5rem !important;
         padding-left: 1rem !important;
         padding-right: 1rem !important;
-        max-height: 100vh !important;
-        overflow: hidden !important;
     }
     
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* Box Watchlist dengan Scroll Internal Presisi */
+    /* Box Watchlist dengan Tinggi Tetap & Scroll Internal */
     .watchlist-box {
-        height: calc(100vh - 165px) !important;
+        height: 440px !important;
         overflow-y: auto !important;
         padding-right: 5px;
     }
@@ -350,7 +346,7 @@ with col_menu:
     selected_screener = st.selectbox(
         "Pilih Screener",
         ["-- Pilih Screener --", "Stoch - Psar"],
-        index=0,
+        index=1, # Default langsung aktif ke Stoch - Psar agar list langsung keluar
         label_visibility="collapsed"
     )
 
@@ -450,10 +446,10 @@ with col_right:
 
     st.markdown("<div style='margin-bottom: 2px;'></div>", unsafe_allow_html=True)
 
-    # VIEW 1: CHART TRADINGVIEW BERSIH (FIT TO SCREEN HEIGHT)
+    # VIEW 1: CHART TRADINGVIEW (Aman tidak terpotong)
     if st.session_state.view_mode == "chart":
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:510px;width:100%">
+        <div class="tradingview-widget-container" style="height:480px;width:100%">
           <div id="tradingview_widget" style="height:100%;width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -478,7 +474,7 @@ with col_right:
           </script>
         </div>
         """
-        st.components.v1.html(tradingview_html, height=515)
+        st.components.v1.html(tradingview_html, height=485)
 
     # VIEW 2: TRADE PLAN ATURAN MUTLAK
     elif st.session_state.view_mode == "trade_plan":
