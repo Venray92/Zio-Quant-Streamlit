@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS untuk merapikan padding atas agar header tidak terpotong
+# Custom CSS
 st.markdown("""
     <style>
     .block-container {
@@ -26,6 +26,15 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
+    
+    /* Styling Card Stat Trade Plan */
+    .tp-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -49,7 +58,7 @@ SAHAM_LIST = [
 ]
 SAHAM_LIST = sorted(list(set(SAHAM_LIST)))
 
-# 3. Engine Screener (Bullish & Bearish dengan Stoch 10,5,5 & PSAR)
+# 3. Engine Screener
 @st.cache_data(ttl=3600)
 def run_screener(tickers):
     results_gc = []
@@ -95,7 +104,7 @@ def run_screener(tickers):
             k4, d4 = float(df['stoch_k'].iloc[-5]), float(df['stoch_d'].iloc[-5])
             psar0 = float(df['psar'].iloc[-1])
 
-            # 1. BULLISH (Golden Cross / Oversold)
+            # Bullish
             if k0 < 35:
                 gc_today = (k1 < d1) and (k0 >= d0)
                 gc_yesterday = (k2 < d2) and (k1 >= d1) and (k0 >= d0)
@@ -122,12 +131,12 @@ def run_screener(tickers):
                         "Type": stoch_signal["type"]
                     })
 
-            # 2. BEARISH (Dead Cross / Overbought)
+            # Bearish
             if k0 >= 75:
                 dc_today = (k1 > d1) and (k0 <= d0)
                 dc_yesterday = (k2 > d2) and (k1 <= d1) and (k0 <= d0)
-                dc_2days_ago = (k3 > d3) and (k2 <= d2) and (k1 <= d1) and (k0 <= d0)
-                dc_3days_ago = (k4 > d4) and (k3 >= d3) and (k2 <= d2) and (k1 <= d1) and (k0 <= d0)
+                dc_2days_ago = (k3 > d3) and (k2 >= d2) and (k1 >= d1) and (k0 >= d0)
+                dc_3days_ago = (k4 < d4) and (k3 >= d3) and (k2 >= d2) and (k1 >= d1) and (k0 >= d0)
                 is_almost_dc = (k0 >= d0) and ((k0 - d0) <= 3.0)
 
                 dc_signal = None
@@ -161,7 +170,22 @@ def run_screener(tickers):
 
     return df_gc, df_dc
 
-# Fungsi ambil data IHSG terkini
+# Ambil data statistik saham untuk Trade Plan
+@st.cache_data(ttl=600)
+def get_stock_details(symbol):
+    try:
+        yf_symbol = "^JKSE" if symbol == "^JKSE" else f"{symbol.replace('IDX:', '')}.JK"
+        df = yf.download(yf_symbol, period="30d", interval="1d", progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        c0 = float(df['Close'].iloc[-1])
+        low20 = float(df['Low'].min())
+        high20 = float(df['High'].max())
+        return c0, low20, high20
+    except:
+        return 1000.0, 950.0, 1100.0
+
+# Ambil data IHSG
 @st.cache_data(ttl=600)
 def get_ihsg_data():
     try:
@@ -175,7 +199,7 @@ def get_ihsg_data():
     except:
         return 7000.0, 0.0
 
-# 4. Header Bar (Logo, Nama, Dropdown Menu)
+# 4. Header Bar
 col_logo, col_title, col_space, col_menu = st.columns([0.3, 2.2, 4.2, 2.3])
 
 with col_logo:
@@ -189,23 +213,25 @@ with col_menu:
         "Pilih Screener",
         ["-- Pilih Screener --", "Stoch - Psar"],
         index=0,
-        key="screener_dropdown",
         label_visibility="collapsed"
     )
 
 st.markdown("<hr style='margin-top: 5px; margin-bottom: 12px; border-color: #30363d;'>", unsafe_allow_html=True)
 
-# Session State untuk Menyimpan Ticker Aktif
+# Session States
 if 'active_ticker' not in st.session_state:
     st.session_state.active_ticker = "^JKSE"
 
-# 5. Layout Utama (Kiri: List IHSG & Screener, Kanan: TradingView Chart Bersih & Tombol Trade Plan)
+if 'view_mode' not in st.session_state:
+    st.session_state.view_mode = "chart"
+
+# 5. Layout Utama
 col_left, col_right = st.columns([1, 2.2], gap="medium")
 
+# --- KIRI: WATCHLIST & SCREENER ---
 with col_left:
     st.markdown("<p style='font-size: 12px; color: #8b949e; margin-bottom: 6px; font-weight: 600;'>MARKET INDEX & WATCHLIST</p>", unsafe_allow_html=True)
     
-    # IHSG Selalu di Posisi No. 1
     ihsg_price, ihsg_chg = get_ihsg_data()
     ihsg_sign = "+" if ihsg_chg >= 0 else ""
     
@@ -215,7 +241,6 @@ with col_left:
 
     st.markdown("<div style='margin: 8px 0;'></div>", unsafe_allow_html=True)
 
-    # Jika menu Stoch - Psar dipilih, tampilkan tab Bullish & Bearish di bawah IHSG
     if selected_screener == "Stoch - Psar":
         st.markdown("<p style='font-size: 12px; color: #58a6ff; font-weight: bold; margin-bottom: 4px;'>⚡ SCREENER: STOCH (10,5,5) - PSAR</p>", unsafe_allow_html=True)
         
@@ -250,54 +275,93 @@ with col_left:
     else:
         st.markdown("<p style='font-size: 12px; color: #8b949e; font-style: italic;'>Pilih menu **Stoch - Psar** di kanan atas untuk menampilkan hasil screening.</p>", unsafe_allow_html=True)
 
+# --- KANAN: DISPLAY CHART / TRADE PLAN ---
 with col_right:
-    # Tombol Trade Plan pengganti teks live chart
-    col_empty, col_btn = st.columns([2.5, 1])
-    with col_btn:
-        if st.button("📋 Trade Plan", use_container_width=True):
-            st.info("Modul Trade Plan aktif.")
-
     active_symbol = st.session_state.active_ticker
+    clean_ticker = "IHSG" if active_symbol == "^JKSE" else active_symbol.replace("IDX:", "")
     
-    # TradingView Chart dengan setting Stoch (10, 5, 5), PSAR, tanpa widget samping, dan volume disembunyikan agar bersih
-    tradingview_html = f"""
-    <div class="tradingview-widget-container" style="height:620px;width:100%">
-      <div id="tradingview_widget" style="height:100%;width:100%"></div>
-      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      new TradingView.widget(
-      {{
-        "autosize": true,
-        "symbol": "{active_symbol}",
-        "interval": "D",
-        "timezone": "Asia/Jakarta",
-        "theme": "dark",
-        "style": "1",
-        "locale": "id",
-        "toolbar_bg": "#f1f3f6",
-        "enable_publishing": false,
-        "allow_symbol_change": true,
-        "details": false,
-        "hotlist": false,
-        "calendar": false,
-        "studies": [
-          "ParabolicSAR@tv-basicstudies",
-          "Stochastic@tv-basicstudies"
-        ],
-        "studies_overrides": {{
-          "ParabolicSAR.start": 0.02,
-          "ParabolicSAR.increment": 0.02,
-          "ParabolicSAR.max value": 0.2,
-          "Stochastic.length": 10,
-          "Stochastic.k smoothing": 5,
-          "Stochastic.d smoothing": 5
-        }},
-        "disabled_features": [
-          "volume_force_overlay"
-        ],
-        "container_id": "tradingview_widget"
-      }});
-      </script>
-    </div>
-    """
-    st.components.v1.html(tradingview_html, height=630)
+    # Tombol Switcher: Chart vs Trade Plan
+    c_title, c_b1, c_b2 = st.columns([2.5, 1, 1])
+    with c_title:
+        st.markdown(f"<p style='font-size: 16px; font-weight: bold; color: #58a6ff; margin: 0;'>{clean_ticker}</p>", unsafe_allow_html=True)
+    with c_b1:
+        if st.button("📈 Chart", use_container_width=True):
+            st.session_state.view_mode = "chart"
+            st.rerun()
+    with c_b2:
+        if st.button("📋 Trade Plan", use_container_width=True):
+            st.session_state.view_mode = "trade_plan"
+            st.rerun()
+
+    st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+
+    # TAMPILAN 1: CHART TRADINGVIEW BERSIH (TANPA INDIKATOR DEFAULT, ADA DRAWING TOOLS)
+    if st.session_state.view_mode == "chart":
+        tradingview_html = f"""
+        <div class="tradingview-widget-container" style="height:600px;width:100%">
+          <div id="tradingview_widget" style="height:100%;width:100%"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget(
+          {{
+            "autosize": true,
+            "symbol": "{active_symbol}",
+            "interval": "D",
+            "timezone": "Asia/Jakarta",
+            "theme": "dark",
+            "style": "1",
+            "locale": "id",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "allow_symbol_change": true,
+            "hide_side_toolbar": false,
+            "details": false,
+            "hotlist": false,
+            "calendar": false,
+            "container_id": "tradingview_widget"
+          }});
+          </script>
+        </div>
+        """
+        st.components.v1.html(tradingview_html, height=610)
+
+    # TAMPILAN 2: HALAMAN TRADE PLAN DINAMIS
+    elif st.session_state.view_mode == "trade_plan":
+        c_price, supp_low, res_high = get_stock_details(active_symbol)
+        
+        # Kalkulasi Trade Plan
+        entry_price = c_price
+        stop_loss = int(supp_low * 0.98) # Support - 2%
+        target_profit = int(entry_price + (entry_price - stop_loss) * 2) # Risk/Reward 1:2
+        
+        risk_pct = round(((entry_price - stop_loss) / entry_price) * 100, 2)
+        reward_pct = round(((target_profit - entry_price) / entry_price) * 100, 2)
+        rr_ratio = round(reward_pct / risk_pct, 2) if risk_pct > 0 else 0
+
+        st.markdown(f"#### 📋 Trade Plan Kalkulator — `{clean_ticker}`")
+        st.markdown("---")
+        
+        col_tp1, col_tp2, col_tp3 = st.columns(3)
+        with col_tp1:
+            st.metric("Harga Saat Ini (Entry)", f"Rp {int(entry_price):,}")
+            st.metric("Risk / Loss (%)", f"-{risk_pct}%")
+        with col_tp2:
+            st.metric("Stop Loss (Cut Loss)", f"Rp {stop_loss:,}", delta=f"-{risk_pct}%", delta_color="inverse")
+            st.metric("Reward / Gain (%)", f"+{reward_pct}%")
+        with col_tp3:
+            st.metric("Target Profit (TP)", f"Rp {target_profit:,}", delta=f"+{reward_pct}%")
+            st.metric("Risk to Reward Ratio", f"1 : {rr_ratio}")
+
+        st.markdown("---")
+        st.markdown("##### 💡 Simulasi Alokasi Modal Trading")
+        modal = st.number_input("Masukkan Modal Trading (Rp):", min_value=1_000_000, value=10_000_000, step=1_000_000)
+        
+        total_lot = int(modal // (entry_price * 100))
+        total_buy = total_lot * entry_price * 100
+        max_loss_rp = total_lot * 100 * (entry_price - stop_loss)
+        max_gain_rp = total_lot * 100 * (target_profit - entry_price)
+
+        c_m1, c_m2, c_m3 = st.columns(3)
+        c_m1.info(f"**Maksimal Pembelian:**\n\n**{total_lot} Lot** (Rp {int(total_buy):,})")
+        c_m2.error(f"**Maksimal Risiko (Loss):**\n\n- Rp {int(max_loss_rp):,}")
+        c_m3.success(f"**Potensi Profit (Gain):**\n\n+ Rp {int(max_gain_rp):,}")
