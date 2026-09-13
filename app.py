@@ -68,7 +68,6 @@ st.markdown("""
         color: #00E676 !important;
     }
     
-    /* Style untuk Home Brand Link Button */
     .home-btn button {
         background: transparent !important;
         border: none !important;
@@ -86,15 +85,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Inisialisasi State Awal
+# 2. Inisialisasi State Awal & Reset
 def reset_to_home():
-    st.session_state.active_ticker = "IDX:COMPOSITE"
+    st.session_state.active_ticker = "IDX:ISAT"
     st.session_state.view_mode = "chart"
     st.session_state.watchlist_tab = "bull"
     st.session_state.screener_choice = "-- Pilih Screener --"
+    st.session_state.search_input = "ISAT"
 
 if 'active_ticker' not in st.session_state:
-    st.session_state.active_ticker = "IDX:COMPOSITE"
+    st.session_state.active_ticker = "IDX:ISAT"
 
 if 'view_mode' not in st.session_state:
     st.session_state.view_mode = "chart"
@@ -105,7 +105,7 @@ if 'watchlist_tab' not in st.session_state:
 if 'screener_choice' not in st.session_state:
     st.session_state.screener_choice = "-- Pilih Screener --"
 
-# 3. Data Nama Perusahaan Saham IDX
+# 3. Database Nama Perusahaan Saham IDX (Lengkap & ISAT Utuh)
 TICKER_NAMES = {
     "ISAT": "Indosat Tbk.",
     "BBCA": "Bank Central Asia Tbk.",
@@ -120,6 +120,22 @@ TICKER_NAMES = {
     "AMMN": "Amman Mineral Internasional Tbk.",
     "BREN": "Barito Renewables Energy Tbk.",
     "GOTO": "GoTo Gojek Tokopedia Tbk.",
+    "ACES": "Aspirasi Hidup Indonesia Tbk.",
+    "AKRA": "AKR Corporindo Tbk.",
+    "AMRT": "Sumber Alfaria Trijaya Tbk.",
+    "BRIS": "Bank Syariah Indonesia Tbk.",
+    "BRPT": "Barito Pacific Tbk.",
+    "CPIN": "Charoen Pokphand Indonesia Tbk.",
+    "ICBP": "Indofood CBP Sukses Makmur Tbk.",
+    "INDF": "Indofood Sukses Makmur Tbk.",
+    "INKP": "Indah Kiat Pulp & Paper Tbk.",
+    "KLBF": "Kalbe Farma Tbk.",
+    "MDKA": "Merdeka Copper Gold Tbk.",
+    "MEDC": "Medco Energi Internasional Tbk.",
+    "PGAS": "Perusahaan Gas Negara Tbk.",
+    "PTBA": "Bukit Asam Tbk.",
+    "SMGR": "Semen Indonesia (Persero) Tbk.",
+    "UNTR": "United Tractors Tbk.",
     "COMPOSITE": "Indeks Harga Saham Gabungan (IHSG)"
 }
 
@@ -162,7 +178,7 @@ def add_ticks(price, num_ticks):
     return curr
 
 # 5. Screener Engine
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1800)
 def run_screener(tickers):
     results_gc, results_dc = [], []
     for ticker in tickers:
@@ -180,7 +196,7 @@ def run_screener(tickers):
             h0 = float(df['High'].iloc[-1])
             val0 = c0 * v0
 
-            if c0 <= 50 or val0 < 1_000_000_000: continue
+            if c0 <= 50 or val0 < 500_000_000: continue
 
             df['vol_ma20'] = df['Volume'].rolling(window=20).mean()
             vol_ma20_0 = float(df['vol_ma20'].iloc[-1])
@@ -200,14 +216,12 @@ def run_screener(tickers):
             k0, d0 = float(df['stoch_k'].iloc[-1]), float(df['stoch_d'].iloc[-1])
             k1, d1 = float(df['stoch_k'].iloc[-2]), float(df['stoch_d'].iloc[-2])
             k2, d2 = float(df['stoch_k'].iloc[-3]), float(df['stoch_d'].iloc[-3])
-            k3, d3 = float(df['stoch_k'].iloc[-4]), float(df['stoch_d'].iloc[-4])
-            k4, d4 = float(df['stoch_k'].iloc[-5]), float(df['stoch_d'].iloc[-5])
             psar0 = float(df['psar'].iloc[-1])
 
-            if k0 < 35:
+            if k0 < 45:
                 gc_today = (k1 < d1) and (k0 >= d0)
                 gc_yesterday = (k2 < d2) and (k1 >= d1) and (k0 >= d0)
-                is_almost_gc = (k0 <= d0) and ((d0 - k0) <= 3.0)
+                is_almost_gc = (k0 <= d0) and ((d0 - k0) <= 4.0)
 
                 stoch_signal = None
                 if gc_today: stoch_signal = {"type": "GC", "score": 80}
@@ -218,9 +232,7 @@ def run_screener(tickers):
                     score = stoch_signal["score"]
                     desc_list = [stoch_signal["type"]]
                     if psar0 < l0: score += 20
-                    if v0 > vol_ma20_0: 
-                        score += 10
-                        desc_list.append("Vol Spike")
+                    if v0 > vol_ma20_0: score += 10
                     
                     results_gc.append({
                         "Ticker": ticker.replace(".JK", ""), 
@@ -228,9 +240,9 @@ def run_screener(tickers):
                         "Score": score, "Type": " + ".join(desc_list)
                     })
 
-            if k0 >= 75:
+            if k0 >= 65:
                 dc_today = (k1 > d1) and (k0 <= d0)
-                is_almost_dc = (k0 >= d0) and ((k0 - d0) <= 3.0)
+                is_almost_dc = (k0 >= d0) and ((k0 - d0) <= 4.0)
 
                 dc_signal = None
                 if dc_today: dc_signal = {"type": "DC", "score": -80}
@@ -238,14 +250,13 @@ def run_screener(tickers):
 
                 if dc_signal:
                     score = dc_signal["score"]
-                    desc_list = [dc_signal["type"]]
                     if psar0 > h0: score -= 20
                     if v0 > vol_ma20_0: score -= 10
                     
                     results_dc.append({
                         "Ticker": ticker.replace(".JK", ""), 
                         "Harga": int(c0), "Chg": chg_pct,
-                        "Score": score, "Type": " + ".join(desc_list)
+                        "Score": score, "Type": "DC"
                     })
         except Exception:
             continue
@@ -257,7 +268,7 @@ def run_screener(tickers):
     return df_gc, df_dc
 
 # 6. Trade Plan Engine Berdasarkan Deteksi Fractal Swing Real
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def get_stock_trade_plan(symbol):
     if symbol in ["^JKSE", "IDX:COMPOSITE"]:
         return {"is_ihsg": True}
@@ -384,8 +395,8 @@ def get_ihsg_data():
     except:
         return 7000.0, 0.0
 
-# 7. Header Navigation (Dengan Home Reset Link)
-col_head, col_space, col_menu = st.columns([3, 4, 2.3])
+# 7. Header Navigation (Dengan Home Reset Link & Dropdown Screener)
+col_head, col_space, col_menu = st.columns([3, 3, 2.3])
 
 with col_head:
     st.markdown('<div class="home-btn">', unsafe_allow_html=True)
@@ -405,18 +416,22 @@ with col_menu:
 st.markdown("<hr style='margin-top: 2px; margin-bottom: 6px; border-color: #1E2D3D;'>", unsafe_allow_html=True)
 
 # 8. Layout Utama (2 Kolom)
-col_left, col_right = st.columns([1, 2.2], gap="medium")
+col_left, col_right = st.columns([1.1, 2.1], gap="medium")
 
-# --- KIRI: MARKET INDEX & WATCHLIST ---
+# --- KIRI: SEARCH TICKER, MARKET INDEX & WATCHLIST ---
 with col_left:
-    st.markdown("<p style='font-size: 11px; color: #64748B; margin-bottom: 4px; font-weight: 600;'>MARKET INDEX & WATCHLIST</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 11px; color: #64748B; margin-bottom: 4px; font-weight: 600;'>SEARCH & WATCHLIST</p>", unsafe_allow_html=True)
     
+    # Input Pencarian Ticker Manual (Penolong utama agar saham tidak pernah hilang)
+    search_symbol = st.text_input("Cari Ticker (cth: ISAT, BBCA)", value="", placeholder="Ketik Kode Saham...", label_visibility="collapsed")
+    if search_symbol:
+        st.session_state.active_ticker = f"IDX:{search_symbol.upper().strip()}"
+
     ihsg_price, ihsg_chg = get_ihsg_data()
     ihsg_sign = "+" if ihsg_chg >= 0 else ""
     
     if st.button(f"📊 **IHSG** | {ihsg_price:,.2f} ({ihsg_sign}{ihsg_chg:.2f}%)", use_container_width=True):
         st.session_state.active_ticker = "IDX:COMPOSITE"
-        st.session_state.screener_choice = "-- Pilih Screener --"
         st.rerun()
 
     st.markdown("<div style='margin: 4px 0;'></div>", unsafe_allow_html=True)
@@ -435,7 +450,7 @@ with col_left:
         with st.spinner("Memindai pasar..."):
             df_bull, df_bear = run_screener(SAHAM_LIST)
 
-        with st.container(height=435):
+        with st.container(height=420):
             df_curr = df_bull if st.session_state.watchlist_tab == "bull" else df_bear
             if not df_curr.empty:
                 for index, row in df_curr.iterrows():
@@ -443,7 +458,6 @@ with col_left:
                     t_price = row["Harga"]
                     t_chg = row["Chg"]
                     t_score = row["Score"]
-                    t_type = row["Type"]
                     chg_sign = "+" if t_chg >= 0 else ""
                     
                     btn_label = f"{t_code} | {t_price:,} | {chg_sign}{t_chg:.2f}% | Score: {t_score}"
@@ -451,9 +465,9 @@ with col_left:
                         st.session_state.active_ticker = f"IDX:{t_code}"
                         st.rerun()
             else:
-                st.info("Tidak ada saham ditemukan.")
+                st.info("Tidak ada saham hasil screener saat ini.")
     else:
-        st.info("Silakan pilih screener pada dropdown kanan atas.")
+        st.caption("🔍 Ketik Ticker di atas atau pilih Screener di kanan atas.")
 
 # --- KANAN: CHART / TRADE PLAN ---
 with col_right:
@@ -516,7 +530,7 @@ with col_right:
         if tp.get("is_ihsg", False):
             st.info("ℹ️ Indeks IHSG (Composite) tidak memiliki Trade Plan individual.")
         else:
-            # Pemberitahuan Kecondongan Tipe Beli
+            # Pemberitahuan Kecondongan Tipe Beli (BOW vs BOB)
             st.markdown(f"""
                 <div style="background: #121E2B; border: 1px solid {tp['bias_color']}; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px;">
                     <p style="color: #64748B; font-size: 11px; margin: 0; font-weight: 600;">REKOMENDASI KECONDONGAN HARGA</p>
