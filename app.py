@@ -135,6 +135,8 @@ def run_screener(tickers):
                 df.columns = df.columns.get_level_values(0)
 
             c0 = float(df['Close'].iloc[-1])
+            c1 = float(df['Close'].iloc[-2])
+            chg_pct = ((c0 - c1) / c1) * 100
             v0 = float(df['Volume'].iloc[-1])
             l0 = float(df['Low'].iloc[-1])
             h0 = float(df['High'].iloc[-1])
@@ -173,7 +175,7 @@ def run_screener(tickers):
                 is_almost_gc = (k0 <= d0) and ((d0 - k0) <= 3.0)
 
                 stoch_signal = None
-                if gc_today: stoch_signal = {"type": "GC Hari Ini", "score": 80}
+                if gc_today: stoch_signal = {"type": "GC", "score": 80}
                 elif gc_yesterday: stoch_signal = {"type": "GC Kemarin", "score": 70}
                 elif gc_2days_ago: stoch_signal = {"type": "GC 2H Lalu", "score": 70}
                 elif gc_3days_ago: stoch_signal = {"type": "GC 3H Lalu", "score": 70}
@@ -181,9 +183,19 @@ def run_screener(tickers):
 
                 if stoch_signal:
                     score = stoch_signal["score"]
+                    desc_list = [stoch_signal["type"]]
                     if psar0 < l0: score += 20
-                    if v0 > vol_ma20_0: score += 10
-                    results_gc.append({"Ticker": ticker.replace(".JK", ""), "Harga": int(c0), "Score": score, "Type": stoch_signal["type"]})
+                    if v0 > vol_ma20_0: 
+                        score += 10
+                        desc_list.append("Vol Spike")
+                    
+                    results_gc.append({
+                        "Ticker": ticker.replace(".JK", ""), 
+                        "Harga": int(c0), 
+                        "Chg": chg_pct,
+                        "Score": score, 
+                        "Type": " + ".join(desc_list)
+                    })
 
             # Bearish Filter
             if k0 >= 75:
@@ -194,7 +206,7 @@ def run_screener(tickers):
                 is_almost_dc = (k0 >= d0) and ((k0 - d0) <= 3.0)
 
                 dc_signal = None
-                if dc_today: dc_signal = {"type": "DC Hari Ini", "score": -80}
+                if dc_today: dc_signal = {"type": "DC", "score": -80}
                 elif dc_yesterday: dc_signal = {"type": "DC Kemarin", "score": -70}
                 elif dc_2days_ago: dc_signal = {"type": "DC 2H Lalu", "score": -70}
                 elif dc_3days_ago: dc_signal = {"type": "DC 3H Lalu", "score": -70}
@@ -202,9 +214,19 @@ def run_screener(tickers):
 
                 if dc_signal:
                     score = dc_signal["score"]
+                    desc_list = [dc_signal["type"]]
                     if psar0 > h0: score -= 20
-                    if v0 > vol_ma20_0: score -= 10
-                    results_dc.append({"Ticker": ticker.replace(".JK", ""), "Harga": int(c0), "Score": score, "Type": dc_signal["type"]})
+                    if v0 > vol_ma20_0: 
+                        score -= 10
+                        desc_list.append("Vol Spike")
+                    
+                    results_dc.append({
+                        "Ticker": ticker.replace(".JK", ""), 
+                        "Harga": int(c0), 
+                        "Chg": chg_pct,
+                        "Score": score, 
+                        "Type": " + ".join(desc_list)
+                    })
         except Exception:
             continue
 
@@ -340,7 +362,7 @@ with col_left:
     ihsg_sign = "+" if ihsg_chg >= 0 else ""
     
     # Tombol IHSG sekaligus sebagai tombol Reset / Home
-    if st.button(f"📊  **IHSG**  |  {ihsg_price:,.2f}  ({ihsg_sign}{ihsg_chg:.2f}%)", use_container_width=True):
+    if st.button(f"📊 **IHSG** | {ihsg_price:,.2f} ({ihsg_sign}{ihsg_chg:.2f}%)", use_container_width=True):
         st.session_state.active_ticker = "IDX:COMPOSITE"
         st.session_state.screener_choice = "-- Pilih Screener --"
         st.rerun()
@@ -363,15 +385,20 @@ with col_left:
         with st.spinner("Memindai pasar..."):
             df_bull, df_bear = run_screener(SAHAM_LIST)
 
-        # HEIGHT DISESUAIKAN MENJADI 448 PX SUPAYA TEPAT PRESISI DENGAN ALAS CHART TRADINGVIEW
         with st.container(height=435):
             if st.session_state.watchlist_tab == "bull":
                 if not df_bull.empty:
                     for index, row in df_bull.iterrows():
                         t_code = row["Ticker"]
                         t_price = row["Harga"]
+                        t_chg = row["Chg"]
+                        t_score = row["Score"]
                         t_type = row["Type"]
-                        if st.button(f"🔹 **{t_code}** | {t_price:,} | *{t_type}*", key=f"bull_{t_code}", use_container_width=True):
+                        chg_sign = "+" if t_chg >= 0 else ""
+                        chg_formatted = f"{chg_sign}{t_chg:.2f}%"
+                        
+                        btn_label = f"{t_code} | {t_price:,} | {chg_formatted} | Score: {t_score} ({t_type})"
+                        if st.button(btn_label, key=f"bull_{t_code}", use_container_width=True):
                             st.session_state.active_ticker = f"IDX:{t_code}"
                             st.rerun()
                 else:
@@ -381,8 +408,14 @@ with col_left:
                     for index, row in df_bear.iterrows():
                         t_code = row["Ticker"]
                         t_price = row["Harga"]
+                        t_chg = row["Chg"]
+                        t_score = row["Score"]
                         t_type = row["Type"]
-                        if st.button(f"🔻 **{t_code}** | {t_price:,} | *{t_type}*", key=f"bear_{t_code}", use_container_width=True):
+                        chg_sign = "+" if t_chg >= 0 else ""
+                        chg_formatted = f"{chg_sign}{t_chg:.2f}%"
+                        
+                        btn_label = f"{t_code} | {t_price:,} | {chg_formatted} | Score: {t_score} ({t_type})"
+                        if st.button(btn_label, key=f"bear_{t_code}", use_container_width=True):
                             st.session_state.active_ticker = f"IDX:{t_code}"
                             st.rerun()
                 else:
