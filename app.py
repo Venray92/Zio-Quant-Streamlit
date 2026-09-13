@@ -507,8 +507,10 @@ def get_stock_trade_plan(symbol):
         chg_val = c0 - c1
         chg_pct = (chg_val / c1) * 100
 
-        # 1. Deteksi Swing High (Resistance) & Swing Low (Support Terdekat)
-        sh_list, sl_list = find_swing_points(df, window=3)
+        #
+        # Ambil data 60 hari terakhir saja agar swing point sesuai dengan harga saat ini
+df_recent = df.tail(60)
+sh_list, sl_list = find_swing_points(df_recent, window=3)
         
         # High Terdekat & Resistance Berikutnya
         valid_sh = sorted(list(set([round_to_bei_tick(x) for x in sh_list])))
