@@ -6,7 +6,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 1. Konfigurasi Halaman & Custom Theme Sesuai Logo (Hijau Neon & Dark Navy)
+# 1. Konfigurasi Halaman & Custom Theme Fit-to-Screen (Zero Window Scroll)
 st.set_page_config(
     page_title="Zio - Quant",
     page_icon="📈",
@@ -16,27 +16,31 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* Global Background & Text */
-    .stApp {
+    /* Kunci layout agar halaman utama tidak memiliki scrollbar luar */
+    html, body, [data-testid="stAppViewContainer"], .stApp {
+        height: 100vh !important;
+        overflow: hidden !important;
         background-color: #0B131D !important;
         color: #E2E8F0;
     }
     
     .block-container {
         padding-top: 0.2rem !important;
-        padding-bottom: 0.5rem !important;
+        padding-bottom: 0.2rem !important;
         padding-left: 1rem !important;
         padding-right: 1rem !important;
+        max-height: 100vh !important;
+        overflow: hidden !important;
     }
     
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* Box Watchlist Scrollable */
+    /* Box Watchlist dengan Scroll Internal Presisi */
     .watchlist-box {
-        max-height: 480px;
-        overflow-y: auto;
+        height: calc(100vh - 165px) !important;
+        overflow-y: auto !important;
         padding-right: 5px;
     }
     
@@ -45,14 +49,14 @@ st.markdown("""
         background: linear-gradient(135deg, #121E2B 0%, #1A293B 100%);
         border: 1px solid #243447;
         border-left: 5px solid #00E676;
-        padding: 6px 14px;
+        padding: 4px 12px;
         border-radius: 6px;
         display: inline-block;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
     }
     .ticker-header-text {
         color: #00E676;
-        font-size: 17px;
+        font-size: 16px;
         font-weight: 700;
         letter-spacing: 0.5px;
         margin: 0;
@@ -237,7 +241,6 @@ def run_screener(tickers):
 # 5. Fetch Analisis Historis Saham & Rule Trade Plan
 @st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
-    # Jika Ticker IHSG, kembalikan data kosong (-)
     if symbol in ["^JKSE", "IDX:COMPOSITE"]:
         return {
             "is_ihsg": True, "price": "-", "plan_type": "-", "is_breakdown": False,
@@ -351,7 +354,7 @@ with col_menu:
         label_visibility="collapsed"
     )
 
-st.markdown("<hr style='margin-top: 2px; margin-bottom: 8px; border-color: #1E2D3D;'>", unsafe_allow_html=True)
+st.markdown("<hr style='margin-top: 2px; margin-bottom: 6px; border-color: #1E2D3D;'>", unsafe_allow_html=True)
 
 # Session States Initialization
 if 'active_ticker' not in st.session_state:
@@ -380,7 +383,7 @@ with col_left:
     st.markdown("<div style='margin: 4px 0;'></div>", unsafe_allow_html=True)
 
     if selected_screener == "Stoch - Psar":
-        st.markdown("<p style='font-size: 12px; color: #00E676; font-weight: bold; margin-bottom: 6px;'>Screener</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 12px; color: #00E676; font-weight: bold; margin-bottom: 4px;'>Screener</p>", unsafe_allow_html=True)
         
         with st.spinner("Memindai pasar..."):
             df_bull, df_bear = run_screener(SAHAM_LIST)
@@ -445,12 +448,12 @@ with col_right:
             st.session_state.view_mode = "trade_plan"
             st.rerun()
 
-    st.markdown("<div style='margin-bottom: 4px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom: 2px;'></div>", unsafe_allow_html=True)
 
-    # VIEW 1: CHART TRADINGVIEW BERSIH
+    # VIEW 1: CHART TRADINGVIEW BERSIH (FIT TO SCREEN HEIGHT)
     if st.session_state.view_mode == "chart":
         tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:590px;width:100%">
+        <div class="tradingview-widget-container" style="height:510px;width:100%">
           <div id="tradingview_widget" style="height:100%;width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -475,7 +478,7 @@ with col_right:
           </script>
         </div>
         """
-        st.components.v1.html(tradingview_html, height=600)
+        st.components.v1.html(tradingview_html, height=515)
 
     # VIEW 2: TRADE PLAN ATURAN MUTLAK
     elif st.session_state.view_mode == "trade_plan":
