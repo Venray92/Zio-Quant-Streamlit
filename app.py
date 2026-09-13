@@ -6,7 +6,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 1. Konfigurasi Halaman Full-Width & Dark Mode (Fix Header Kepotong)
+# 1. Konfigurasi Halaman Full-Width & Dark Mode
 st.set_page_config(
     page_title="Zio - Quant",
     page_icon="📈",
@@ -188,6 +188,8 @@ with col_menu:
     selected_screener = st.selectbox(
         "Pilih Screener",
         ["-- Pilih Screener --", "Stoch - Psar"],
+        index=0,
+        key="screener_dropdown",
         label_visibility="collapsed"
     )
 
@@ -197,7 +199,7 @@ st.markdown("<hr style='margin-top: 5px; margin-bottom: 12px; border-color: #303
 if 'active_ticker' not in st.session_state:
     st.session_state.active_ticker = "^JKSE"
 
-# 5. Layout Utama (Kiri: List IHSG & Screener, Kanan: TradingView Chart Bersih)
+# 5. Layout Utama (Kiri: List IHSG & Screener, Kanan: TradingView Chart Bersih & Tombol Trade Plan)
 col_left, col_right = st.columns([1, 2.2], gap="medium")
 
 with col_left:
@@ -249,12 +251,15 @@ with col_left:
         st.markdown("<p style='font-size: 12px; color: #8b949e; font-style: italic;'>Pilih menu **Stoch - Psar** di kanan atas untuk menampilkan hasil screening.</p>", unsafe_allow_html=True)
 
 with col_right:
+    # Tombol Trade Plan pengganti teks live chart
+    col_empty, col_btn = st.columns([2.5, 1])
+    with col_btn:
+        if st.button("📋 Trade Plan", use_container_width=True):
+            st.info("Modul Trade Plan aktif.")
+
     active_symbol = st.session_state.active_ticker
-    display_name = "IHSG" if active_symbol == "^JKSE" else active_symbol.replace("IDX:", "")
     
-    st.markdown(f"<p style='font-size: 14px; font-weight: bold; color: #e6edf3; margin-bottom: 5px;'>📊 Live Chart: {display_name}</p>", unsafe_allow_html=True)
-    
-    # TradingView Chart tanpa widget samping, full tools, dengan parameter Stochastic (10, 5, 5) dan Parabolic SAR
+    # TradingView Chart dengan setting Stoch (10, 5, 5), PSAR, tanpa widget samping, dan volume disembunyikan agar bersih
     tradingview_html = f"""
     <div class="tradingview-widget-container" style="height:620px;width:100%">
       <div id="tradingview_widget" style="height:100%;width:100%"></div>
@@ -280,10 +285,16 @@ with col_right:
           "Stochastic@tv-basicstudies"
         ],
         "studies_overrides": {{
+          "ParabolicSAR.start": 0.02,
+          "ParabolicSAR.increment": 0.02,
+          "ParabolicSAR.max value": 0.2,
           "Stochastic.length": 10,
           "Stochastic.k smoothing": 5,
           "Stochastic.d smoothing": 5
         }},
+        "disabled_features": [
+          "volume_force_overlay"
+        ],
         "container_id": "tradingview_widget"
       }});
       </script>
