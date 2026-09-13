@@ -6,7 +6,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 1. Konfigurasi Halaman Full-Width & Dark Mode
+# 1. Konfigurasi Halaman Full-Width & Dark Mode (Fix Header Kepotong)
 st.set_page_config(
     page_title="Zio - Quant",
     page_icon="📈",
@@ -14,39 +14,18 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS untuk Styling UI/UX ala Stockbit/TradingView
+# Custom CSS untuk merapikan padding atas agar header tidak terpotong
 st.markdown("""
     <style>
-    .main {
-        background-color: #0e1117;
-        color: #ffffff;
-    }
     .block-container {
-        padding-top: 0.8rem;
+        padding-top: 0.5rem !important;
         padding-bottom: 1rem;
         padding-left: 1rem;
         padding-right: 1rem;
     }
-    /* Sembunyikan elemen default streamlit yang tidak perlu */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    /* Styling List Card Saham */
-    .stock-card {
-        background-color: #161b22;
-        border: 1px solid #30363d;
-        padding: 10px 14px;
-        border-radius: 8px;
-        margin-bottom: 8px;
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .stock-card:hover {
-        border-color: #58a6ff;
-        background-color: #1f242c;
-    }
+    header {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -70,7 +49,7 @@ SAHAM_LIST = [
 ]
 SAHAM_LIST = sorted(list(set(SAHAM_LIST)))
 
-# 3. Fungsi Engine Screener
+# 3. Engine Screener (Bullish & Bearish dengan Stoch 10,5,5 & PSAR)
 @st.cache_data(ttl=3600)
 def run_screener(tickers):
     results_gc = []
@@ -96,6 +75,7 @@ def run_screener(tickers):
             df['vol_ma20'] = df['Volume'].rolling(window=20).mean()
             vol_ma20_0 = float(df['vol_ma20'].iloc[-1])
 
+            # STOCHASTIC (10, 5, 5)
             low_min10 = df['Low'].rolling(window=10).min()
             high_max10 = df['High'].rolling(window=10).max()
             fast_k = 100 * ((df['Close'] - low_min10) / (high_max10 - low_min10))
@@ -115,7 +95,7 @@ def run_screener(tickers):
             k4, d4 = float(df['stoch_k'].iloc[-5]), float(df['stoch_d'].iloc[-5])
             psar0 = float(df['psar'].iloc[-1])
 
-            # Golden Cross
+            # 1. BULLISH (Golden Cross / Oversold)
             if k0 < 35:
                 gc_today = (k1 < d1) and (k0 >= d0)
                 gc_yesterday = (k2 < d2) and (k1 >= d1) and (k0 >= d0)
@@ -141,13 +121,45 @@ def run_screener(tickers):
                         "Score": score,
                         "Type": stoch_signal["type"]
                     })
+
+            # 2. BEARISH (Dead Cross / Overbought)
+            if k0 >= 75:
+                dc_today = (k1 > d1) and (k0 <= d0)
+                dc_yesterday = (k2 > d2) and (k1 <= d1) and (k0 <= d0)
+                dc_2days_ago = (k3 > d3) and (k2 <= d2) and (k1 <= d1) and (k0 <= d0)
+                dc_3days_ago = (k4 > d4) and (k3 >= d3) and (k2 <= d2) and (k1 <= d1) and (k0 <= d0)
+                is_almost_dc = (k0 >= d0) and ((k0 - d0) <= 3.0)
+
+                dc_signal = None
+                if dc_today: dc_signal = {"type": "DC Hari Ini", "score": -80}
+                elif dc_yesterday: dc_signal = {"type": "DC Kemarin", "score": -70}
+                elif dc_2days_ago: dc_signal = {"type": "DC 2H Lalu", "score": -70}
+                elif dc_3days_ago: dc_signal = {"type": "DC 3H Lalu", "score": -70}
+                elif is_almost_dc: dc_signal = {"type": "Early DC", "score": -55}
+
+                if dc_signal:
+                    score = dc_signal["score"]
+                    if psar0 > h0: score -= 20
+                    if v0 > vol_ma20_0: score -= 10
+
+                    results_dc.append({
+                        "Ticker": ticker.replace(".JK", ""),
+                        "Harga": int(c0),
+                        "Score": score,
+                        "Type": dc_signal["type"]
+                    })
         except Exception:
             continue
 
     df_gc = pd.DataFrame(results_gc)
+    df_dc = pd.DataFrame(results_dc)
+
     if not df_gc.empty:
         df_gc = df_gc.sort_values(by="Score", ascending=False).reset_index(drop=True)
-    return df_gc
+    if not df_dc.empty:
+        df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
+
+    return df_gc, df_dc
 
 # Fungsi ambil data IHSG terkini
 @st.cache_data(ttl=600)
@@ -164,74 +176,85 @@ def get_ihsg_data():
         return 7000.0, 0.0
 
 # 4. Header Bar (Logo, Nama, Dropdown Menu)
-col_logo, col_title, col_space, col_menu = st.columns([0.4, 2.2, 4, 2.5])
+col_logo, col_title, col_space, col_menu = st.columns([0.3, 2.2, 4.2, 2.3])
 
 with col_logo:
-    # Menampilkan Logo Anda
-    st.image("1_2.png", width=38)
+    st.markdown("<h2 style='margin: 0; padding-top: 2px;'>📈</h2>", unsafe_allow_html=True)
 
 with col_title:
-    st.markdown("<h3 style='margin: 0; padding-top: 4px; font-size: 18px; color: #e6edf3;'>Zio - Quant</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='margin: 0; padding-top: 6px; font-size: 17px; color: #e6edf3; font-weight: 700;'>Zio - Quant</h3>", unsafe_allow_html=True)
 
 with col_menu:
-    # Dropdown Screener di Kanan Atas Header
     selected_screener = st.selectbox(
         "Pilih Screener",
         ["-- Pilih Screener --", "Stoch - Psar"],
         label_visibility="collapsed"
     )
 
-st.markdown("<hr style='margin-top: 5px; margin-bottom: 15px; border-color: #30363d;'>", unsafe_allow_html=True)
+st.markdown("<hr style='margin-top: 5px; margin-bottom: 12px; border-color: #30363d;'>", unsafe_allow_html=True)
 
-# Session State untuk Menyimpan Ticker yang Sedang Dipilih di Chart
+# Session State untuk Menyimpan Ticker Aktif
 if 'active_ticker' not in st.session_state:
     st.session_state.active_ticker = "^JKSE"
 
-# 5. Layout Utama (Kiri: List IHSG & Screener, Kanan: TradingView Chart)
+# 5. Layout Utama (Kiri: List IHSG & Screener, Kanan: TradingView Chart Bersih)
 col_left, col_right = st.columns([1, 2.2], gap="medium")
 
 with col_left:
-    st.markdown("<p style='font-size: 13px; color: #8b949e; margin-bottom: 8px;'>MARKET INDEX & WATCHLIST</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 12px; color: #8b949e; margin-bottom: 6px; font-weight: 600;'>MARKET INDEX & WATCHLIST</p>", unsafe_allow_html=True)
     
     # IHSG Selalu di Posisi No. 1
     ihsg_price, ihsg_chg = get_ihsg_data()
-    ihsg_color = "#3fb950" if ihsg_chg >= 0 else "#f85149"
     ihsg_sign = "+" if ihsg_chg >= 0 else ""
     
     if st.button(f"📊  **IHSG**  |  {ihsg_price:,.2f}  ({ihsg_sign}{ihsg_chg:.2f}%)", use_container_width=True):
         st.session_state.active_ticker = "^JKSE"
         st.rerun()
 
-    st.markdown("<div style='margin: 10px 0;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin: 8px 0;'></div>", unsafe_allow_html=True)
 
-    # Jika menu Stoch - Psar dipilih, tampilkan list hasil screener di bawah IHSG
+    # Jika menu Stoch - Psar dipilih, tampilkan tab Bullish & Bearish di bawah IHSG
     if selected_screener == "Stoch - Psar":
-        st.markdown("<p style='font-size: 13px; color: #58a6ff; font-weight: bold;'>⚡ HASIL SCREENER: STOCH - PSAR</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 12px; color: #58a6ff; font-weight: bold; margin-bottom: 4px;'>⚡ SCREENER: STOCH (10,5,5) - PSAR</p>", unsafe_allow_html=True)
         
-        with st.spinner("Memindai saham..."):
-            df_screen = run_screener(SAHAM_LIST)
+        with st.spinner("Memindai pasar..."):
+            df_bull, df_bear = run_screener(SAHAM_LIST)
             
-        if not df_screen.empty:
-            for index, row in df_screen.iterrows():
-                t_code = row["Ticker"]
-                t_price = row["Harga"]
-                t_type = row["Type"]
+        tab_bull, tab_bear = st.tabs(["🟢 Bullish", "🔴 Bearish"])
+        
+        with tab_bull:
+            if not df_bull.empty:
+                for index, row in df_bull.iterrows():
+                    t_code = row["Ticker"]
+                    t_price = row["Harga"]
+                    t_type = row["Type"]
+                    if st.button(f"🔹 **{t_code}** | {t_price:,} | *{t_type}*", key=f"bull_{t_code}", use_container_width=True):
+                        st.session_state.active_ticker = f"IDX:{t_code}"
+                        st.rerun()
+            else:
+                st.info("Tidak ada saham Bullish.")
                 
-                if st.button(f"🔹 **{t_code}**  |  Rp {t_price:,}  |  *{t_type}*", key=f"btn_{t_code}", use_container_width=True):
-                    st.session_state.active_ticker = f"IDX:{t_code}"
-                    st.rerun()
-        else:
-            st.info("Tidak ada saham yang memenuhi kriteria saat ini.")
+        with tab_bear:
+            if not df_bear.empty:
+                for index, row in df_bear.iterrows():
+                    t_code = row["Ticker"]
+                    t_price = row["Harga"]
+                    t_type = row["Type"]
+                    if st.button(f"🔻 **{t_code}** | {t_price:,} | *{t_type}*", key=f"bear_{t_code}", use_container_width=True):
+                        st.session_state.active_ticker = f"IDX:{t_code}"
+                        st.rerun()
+            else:
+                st.info("Tidak ada saham Bearish.")
     else:
-        st.markdown("<p style='font-size: 12px; color: #8b949e; font-style: italic;'>Gunakan menu pilihan di kanan atas untuk menampilkan hasil screening saham.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 12px; color: #8b949e; font-style: italic;'>Pilih menu **Stoch - Psar** di kanan atas untuk menampilkan hasil screening.</p>", unsafe_allow_html=True)
 
 with col_right:
-    # 6. Chart TradingView Interaktif
     active_symbol = st.session_state.active_ticker
-    display_name = "IHSG" if active_symbol == "^JKSE" else active_symbol
+    display_name = "IHSG" if active_symbol == "^JKSE" else active_symbol.replace("IDX:", "")
     
     st.markdown(f"<p style='font-size: 14px; font-weight: bold; color: #e6edf3; margin-bottom: 5px;'>📊 Live Chart: {display_name}</p>", unsafe_allow_html=True)
     
+    # TradingView Chart tanpa widget samping, full tools, dengan parameter Stochastic (10, 5, 5) dan Parabolic SAR
     tradingview_html = f"""
     <div class="tradingview-widget-container" style="height:620px;width:100%">
       <div id="tradingview_widget" style="height:100%;width:100%"></div>
@@ -249,13 +272,18 @@ with col_right:
         "toolbar_bg": "#f1f3f6",
         "enable_publishing": false,
         "allow_symbol_change": true,
-        "details": true,
+        "details": false,
         "hotlist": false,
-        "calendar": true,
+        "calendar": false,
         "studies": [
-          "Stochastic@tv-basicstudies",
-          "ParabolicSAR@tv-basicstudies"
+          "ParabolicSAR@tv-basicstudies",
+          "Stochastic@tv-basicstudies"
         ],
+        "studies_overrides": {{
+          "Stochastic.length": 10,
+          "Stochastic.k smoothing": 5,
+          "Stochastic.d smoothing": 5
+        }},
         "container_id": "tradingview_widget"
       }});
       </script>
