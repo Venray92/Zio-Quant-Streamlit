@@ -519,10 +519,48 @@ sh_list, sl_list = find_swing_points(df_recent, window=3)
         valid_sl = sorted(list(set([round_to_bei_tick(x) for x in sl_list])))
         swing_low_real = valid_sl[-1] if len(valid_sl) > 0 else round_to_bei_tick(df['Low'].tail(20).min())
 
-        # 2. Kasus Spesial ISAT atau Deteksi Base / High Konsolidasi 20-Hari
-        base_high = round_to_bei_tick(df['High'].tail(20).max())
-        if clean_code == "ISAT":
-            base_high = 2490.0 # Standardize Breakout Level ISAT
+       # 2. Ambil Base High 20 Hari Terakhir
+base_high = round_to_bei_tick(df['High'].tail(20).max())
+if clean_code == "ISAT":
+    base_high = 2490.0
+
+# Swing Low / Support Terdekat dari 30 hari terakhir
+swing_low_real = valid_sl[-1] if len(valid_sl) > 0 else round_to_bei_tick(df['Low'].tail(20).min())
+
+# JIKA HARGA MENDEKATI BASE HIGH (Jarak <= 5%), PAKAI SKENARIO BOB
+if c0 >= (base_high * 0.95):
+    plan_type = "BUY ON BREAKOUT (BOB)"
+    breakout_point = base_high
+    
+    buy_range_low = breakout_point
+    buy_range_high = add_ticks(breakout_point, 3)
+    sl_price = subtract_ticks(breakout_point, 3)
+    
+    entry_desc = "Akumulasi bertahap (1–3 tick di atas breakout)."
+    sl_desc = "3 tick di bawah breakout point (Cut loss disiplin)."
+    
+    risk_point = buy_range_high - sl_price
+    tp1 = add_ticks(buy_range_high, int((risk_point * 2) / get_tick_size(buy_range_high)))
+    tp2_candidates = [x for x in valid_sh if x > tp1]
+    tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
+    tp3 = add_ticks(tp2, 10)
+
+# JIKA HARGA DI BAWAH BASE HIGH, PAKAI SKENARIO BOW (SEPERTI MBMA 520)
+else:
+    plan_type = "BUY ON WEAKNESS (BOW)"
+    
+    # Buy Zone di sekitar Support Terdekat (Swing Low)
+    buy_range_low = subtract_ticks(swing_low_real, 2)
+    buy_range_high = add_ticks(swing_low_real, 2)
+    sl_price = subtract_ticks(buy_range_low, 3)
+    
+    entry_desc = "Antre beli di area support dekat Swing Low."
+    sl_desc = "3 tick di bawah area support."
+    
+    tp1 = base_high # Target 1 ke Base High terdekat
+    tp2_candidates = [x for x in valid_sh if x > tp1]
+    tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
+    tp3 = add_ticks(tp2, 10)
 
         # Tentukan Tipe Trade Plan
         # Jika Last Price dekat dengan Breakout Level (Base High), gunakan BUY ON BREAKOUT (BOB)
