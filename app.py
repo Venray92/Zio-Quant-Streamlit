@@ -46,6 +46,13 @@ st.markdown("""
         letter-spacing: 0.5px;
         margin: 0;
     }
+    .company-name-text {
+        color: #94A3B8;
+        font-size: 11px;
+        margin-top: 2px;
+        margin-bottom: 0px;
+        font-weight: 500;
+    }
     div.stButton > button[kind="primary"] {
         background-color: #00E676 !important;
         color: #0B131D !important;
@@ -61,10 +68,31 @@ st.markdown("""
         border-color: #00E676 !important;
         color: #00E676 !important;
     }
+
+    /* Styling khusus tombol Brand Link Home */
+    div.stButton > button.brand-btn {
+        background: transparent !important;
+        border: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        text-align: left !important;
+        box-shadow: none !important;
+    }
+    div.stButton > button.brand-btn:hover {
+        background: transparent !important;
+        border: none !important;
+        opacity: 0.8;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # 2. Inisialisasi Session State
+def reset_to_default():
+    st.session_state.active_ticker = "IDX:COMPOSITE"
+    st.session_state.view_mode = "chart"
+    st.session_state.watchlist_tab = "bull"
+    st.session_state.screener_choice = "-- Pilih Screener --"
+
 if 'active_ticker' not in st.session_state:
     st.session_state.active_ticker = "IDX:COMPOSITE"
 
@@ -77,24 +105,157 @@ if 'watchlist_tab' not in st.session_state:
 if 'screener_choice' not in st.session_state:
     st.session_state.screener_choice = "-- Pilih Screener --"
 
-# 3. Daftar Saham IDX
-SAHAM_LIST = sorted(list(set([
-    "ISAT.JK", "ACES.JK", "ADHI.JK", "ADRO.JK", "AGRO.JK", "AALI.JK", "AKRA.JK", "AMMN.JK", "AMRT.JK", "ANTM.JK",
-    "APLN.JK", "ARTO.JK", "ASII.JK", "ASRI.JK", "AUTO.JK", "AVIA.JK", "BBCA.JK", "BBHI.JK", "BBNI.JK", "BBRI.JK",
-    "BBTN.JK", "BCIC.JK", "BDMN.JK", "BELI.JK", "BIRD.JK", "BJBR.JK", "BJTM.JK", "BMRI.JK", "BMTR.JK", "BNGA.JK",
-    "BREN.JK", "BRIS.JK", "BRPT.JK", "BSDE.JK", "BUKA.JK", "BUMI.JK", "BYAN.JK", "CITA.JK", "CLEO.JK", "CMRY.JK",
-    "CPIN.JK", "CTRA.JK", "CUAN.JK", "DCII.JK", "DEWA.JK", "DILD.JK", "DKFT.JK", "DOID.JK", "DRMA.JK", "DSNG.JK",
-    "EAST.JK", "EDGE.JK", "ELSA.JK", "EMTK.JK", "ENRG.JK", "ESSA.JK", "EXCL.JK", "FILM.JK", "GEMS.JK", "GJTL.JK",
-    "GOTO.JK", "HAIS.JK", "HEAL.JK", "HRUM.JK", "ICBP.JK", "INAF.JK", "INCO.JK", "INDF.JK", "INDY.JK", "INKP.JK",
-    "INTP.JK", "IPCC.JK", "IPCM.JK", "IRRA.JK", "ITMG.JK", "JKON.JK", "JPFA.JK", "JSPT.JK", "KAEF.JK", "KEEN.JK",
-    "KIJA.JK", "KLBF.JK", "LEAD.JK", "LSIP.JK", "MAIN.JK", "MAPA.JK", "MAPI.JK", "MBAP.JK", "MBMA.JK", "MCAS.JK",
-    "MDKA.JK", "MEDC.JK", "MEDS.JK", "MIKA.JK", "MNCN.JK", "MPMX.JK", "MTDL.JK", "MYOR.JK", "NCKL.JK", "NELY.JK",
-    "NRCA.JK", "PANI.JK", "PANR.JK", "PGAS.JK", "PGEO.JK", "PNBN.JK", "POWR.JK", "PRDA.JK", "PSAB.JK", "PSSI.JK",
-    "PTBA.JK", "PTPP.JK", "PWON.JK", "RAAM.JK", "RALS.JK", "SAME.JK", "SCMA.JK", "SIDO.JK", "SILO.JK", "SMBR.JK",
-    "SMDR.JK", "SMGR.JK", "SMRA.JK", "SMSM.JK", "SSIA.JK", "SSMS.JK", "STAA.JK", "TAPG.JK", "TBIG.JK", "TCPI.JK",
-    "TINS.JK", "TKIM.JK", "TLKM.JK", "TMAS.JK", "TOBA.JK", "TOTL.JK", "TOWR.JK", "TPIA.JK", "TSPC.JK", "UNTR.JK",
-    "UNVR.JK", "WEGE.JK", "WIFI.JK", "WIKA.JK", "WINS.JK", "WOOD.JK"
-])))
+# 3. Database Nama Lengkap Perusahaan IDX
+NAMA_PERUSAHAAN = {
+    "AALI": "PT Astra Agro Lestari Tbk",
+    "ACES": "PT Aspirasi Hidup Indonesia Tbk",
+    "ADHI": "PT Adhi Karya (Persero) Tbk",
+    "ADRO": "PT Adaro Energy Indonesia Tbk",
+    "AGRO": "PT Bank Raya Indonesia Tbk",
+    "AKRA": "PT AKR Corporindo Tbk",
+    "AMMN": "PT Amman Mineral Internasional Tbk",
+    "AMRT": "PT Sumber Alfaria Trijaya Tbk",
+    "ANTM": "PT Aneka Tambang Tbk",
+    "APLN": "PT Agung Podomoro Land Tbk",
+    "ARTO": "PT Bank Jago Tbk",
+    "ASII": "PT Astra International Tbk",
+    "ASRI": "PT Alam Sutera Realty Tbk",
+    "AUTO": "PT Astra Otoparts Tbk",
+    "AVIA": "PT Avia Avian Tbk",
+    "BBCA": "PT Bank Central Asia Tbk",
+    "BBHI": "PT Allo Bank Indonesia Tbk",
+    "BBNI": "PT Bank Negara Indonesia (Persero) Tbk",
+    "BBRI": "PT Bank Rakyat Indonesia (Persero) Tbk",
+    "BBTN": "PT Bank Tabungan Negara (Persero) Tbk",
+    "BCIC": "PT Bank JTrust Indonesia Tbk",
+    "BDMN": "PT Bank Danamon Indonesia Tbk",
+    "BELI": "PT Global Digital Niaga Tbk (Blibli)",
+    "BIRD": "PT Blue Bird Tbk",
+    "BJBR": "PT Bank Pembangunan Daerah Jawa Barat dan Banten Tbk",
+    "BJTM": "PT Bank Pembangunan Daerah Jawa Timur Tbk",
+    "BMRI": "PT Bank Mandiri (Persero) Tbk",
+    "BMTR": "PT Global Mediacom Tbk",
+    "BNGA": "PT Bank CIMB Niaga Tbk",
+    "BREN": "PT Barito Renewables Energy Tbk",
+    "BRIS": "PT Bank Syariah Indonesia Tbk",
+    "BRPT": "PT Barito Pacific Tbk",
+    "BSDE": "PT Bumi Serpong Damai Tbk",
+    "BUKA": "PT Bukalapak.com Tbk",
+    "BUMI": "PT Bumi Resources Tbk",
+    "BYAN": "PT Bayan Resources Tbk",
+    "CITA": "PT Cita Mineral Investindo Tbk",
+    "CLEO": "PT Sariguna Primatirta Tbk",
+    "CMRY": "PT Cisarua Mountain Dairy Tbk",
+    "CPIN": "PT Charoen Pokphand Indonesia Tbk",
+    "CTRA": "PT Ciputra Development Tbk",
+    "CUAN": "PT Petrindo Jaya Kreasi Tbk",
+    "DCII": "PT DCI Indonesia Tbk",
+    "DEWA": "PT Darma Henwa Tbk",
+    "DILD": "PT Intiland Development Tbk",
+    "DKFT": "PT Central Omega Resources Tbk",
+    "DOID": "PT Delta Dunia Makmur Tbk",
+    "DRMA": "PT Dharma Polimetal Tbk",
+    "DSNG": "PT Dharma Satya Nusantara Tbk",
+    "EAST": "PT Eastparc Hotel Tbk",
+    "EDGE": "PT Indointernet Tbk",
+    "ELSA": "PT Elnusa Tbk",
+    "EMTK": "PT Elang Mahkota Teknologi Tbk",
+    "ENRG": "PT Energi Mega Persada Tbk",
+    "ESSA": "PT ESSA Industries Indonesia Tbk",
+    "EXCL": "PT XL Axiata Tbk",
+    "FILM": "PT MD Pictures Tbk",
+    "GEMS": "PT Golden Energy Mines Tbk",
+    "GJTL": "PT Gajah Tunggal Tbk",
+    "GOTO": "PT GoTo Gojek Tokopedia Tbk",
+    "HAIS": "PT Hasnur Internasional Shipping Tbk",
+    "HEAL": "PT Medikaloka Hermina Tbk",
+    "HRUM": "PT Harum Energy Tbk",
+    "ICBP": "PT Indofood CBP Sukses Makmur Tbk",
+    "INAF": "PT Indofarma Tbk",
+    "INCO": "PT Vale Indonesia Tbk",
+    "INDF": "PT Indofood Sukses Makmur Tbk",
+    "INDY": "PT Indika Energy Tbk",
+    "INKP": "PT Indah Kiat Pulp & Paper Tbk",
+    "INTP": "PT Indocement Tunggal Prakarsa Tbk",
+    "IPCC": "PT Indonesia Kendaraan Terminal Tbk",
+    "IPCM": "PT Jasa Armada Indonesia Tbk",
+    "IRRA": "PT Itama Ranoraya Tbk",
+    "ISAT": "PT Indosat Tbk (Indosat Ooredoo Hutchison)",
+    "ITMG": "PT Indo Tambangraya Megah Tbk",
+    "JKON": "PT Jaya Konstruksi Manggala Pratama Tbk",
+    "JPFA": "PT Japfa Comfeed Indonesia Tbk",
+    "JSPT": "PT Jakarta Setiabudi Internasional Tbk",
+    "KAEF": "PT Kimia Farma Tbk",
+    "KEEN": "PT Kencana Energi Lestari Tbk",
+    "KIJA": "PT Kawasan Industri Jababeka Tbk",
+    "KLBF": "PT Kalbe Farma Tbk",
+    "LEAD": "PT Logindo Samudramakmur Tbk",
+    "LSIP": "PT PP London Sumatra Indonesia Tbk",
+    "MAIN": "PT Malindo Feedmill Tbk",
+    "MAPA": "PT Map Aktif Adiperkasa Tbk",
+    "MAPI": "PT Mitra Adiperkasa Tbk",
+    "MBAP": "PT Mitrabara Adiperdana Tbk",
+    "MBMA": "PT Merdeka Battery Materials Tbk",
+    "MCAS": "PT M Cash Integrasi Tbk",
+    "MDKA": "PT Merdeka Copper Gold Tbk",
+    "MEDC": "PT Medco Energi Internasional Tbk",
+    "MEDS": "PT Hetzer Medical Indonesia Tbk",
+    "MIKA": "PT Mitra Keluarga Karyasehat Tbk",
+    "MNCN": "PT Media Nusantara Citra Tbk",
+    "MPMX": "PT Mitra Pinasthika Mustika Tbk",
+    "MTDL": "PT Metrodata Electronics Tbk",
+    "MYOR": "PT Mayora Indah Tbk",
+    "NCKL": "PT Trimegah Bangun Persada Tbk",
+    "NELY": "PT Pelayaran Nelly Dwi Putri Tbk",
+    "NRCA": "PT Nusa Raya Cipta Tbk",
+    "PANI": "PT Pantai Indah Kapuk Dua Tbk",
+    "PANR": "PT Panorama Sentrawisata Tbk",
+    "PGAS": "PT Perusahaan Gas Negara Tbk",
+    "PGEO": "PT Pertamina Geothermal Energy Tbk",
+    "PNBN": "PT Bank Pan Indonesia Tbk",
+    "POWR": "PT Cikarang Listrindo Tbk",
+    "PRDA": "PT Prodia Widyahusada Tbk",
+    "PSAB": "PT J Resources Asia Pasifik Tbk",
+    "PSSI": "PT Pelita Samudera Shipping Tbk",
+    "PTBA": "PT Bukit Asam Tbk",
+    "PTPP": "PT PP (Persero) Tbk",
+    "PWON": "PT Pakuwon Jati Tbk",
+    "RAAM": "PT Tripar Multivision Plus Tbk",
+    "RALS": "PT Ramayana Lestari Sentosa Tbk",
+    "SAME": "PT Sarana Meditama Metropolitan Tbk",
+    "SCMA": "PT Surya Citra Media Tbk",
+    "SIDO": "PT Industri Jamu dan Farmasi Sido Muncul Tbk",
+    "SILO": "PT Siloam International Hospitals Tbk",
+    "SMBR": "PT Semen Baturaja Tbk",
+    "SMDR": "PT Samudera Indonesia Tbk",
+    "SMGR": "PT Semen Indonesia (Persero) Tbk",
+    "SMRA": "PT Summarecon Agung Tbk",
+    "SMSM": "PT Selamat Sempurna Tbk",
+    "SSIA": "PT Surya Semesta Internusa Tbk",
+    "SSMS": "PT Sawit Sumbermas Sarana Tbk",
+    "STAA": "PT Sumber Tani Agung Resources Tbk",
+    "TAPG": "PT Triputra Agro Persada Tbk",
+    "TBIG": "PT Tower Bersama Infrastructure Tbk",
+    "TCPI": "PT Transcoal Pacific Tbk",
+    "TINS": "PT Timah Tbk",
+    "TKIM": "PT Pabrik Kertas Tjiwi Kimia Tbk",
+    "TLKM": "PT Telkom Indonesia (Persero) Tbk",
+    "TMAS": "PT Temas Tbk",
+    "TOBA": "PT Toba Bara Sejahtra Tbk",
+    "TOTL": "PT Total Bangun Persada Tbk",
+    "TOWR": "PT Sarana Menara Nusantara Tbk",
+    "TPIA": "PT Chandra Asri Pacific Tbk",
+    "TSPC": "PT Tempo Scan Pacific Tbk",
+    "UNTR": "PT United Tractors Tbk",
+    "UNVR": "PT Unilever Indonesia Tbk",
+    "WEGE": "PT Wijaya Karya Bangunan Gedung Tbk",
+    "WIFI": "PT Solusi Sinergi Digital Tbk",
+    "WIKA": "PT Wijaya Karya (Persero) Tbk",
+    "WINS": "PT Wintermar Off Shore Marine Tbk",
+    "WOOD": "PT Integra Indocabinet Tbk"
+}
+
+SAHAM_LIST = sorted(list(set(NAMA_PERUSAHAAN.keys())))
 
 # 4. Helper Fraksi Harga BEI Sesuai Aturan Mutlak
 def get_tick_size(price):
@@ -123,7 +284,8 @@ def run_screener(tickers):
     results_dc = []
     for ticker in tickers:
         try:
-            df = yf.download(ticker, period="90d", interval="1d", progress=False)
+            yf_ticker = f"{ticker}.JK"
+            df = yf.download(yf_ticker, period="90d", interval="1d", progress=False)
             if df.empty or len(df) < 30: continue
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
@@ -183,7 +345,7 @@ def run_screener(tickers):
                         desc_list.append("Vol Spike")
                     
                     results_gc.append({
-                        "Ticker": ticker.replace(".JK", ""), 
+                        "Ticker": ticker, 
                         "Harga": int(c0), 
                         "Chg": chg_pct,
                         "Score": score, 
@@ -213,7 +375,7 @@ def run_screener(tickers):
                         desc_list.append("Vol Spike")
                     
                     results_dc.append({
-                        "Ticker": ticker.replace(".JK", ""), 
+                        "Ticker": ticker, 
                         "Harga": int(c0), 
                         "Chg": chg_pct,
                         "Score": score, 
@@ -255,7 +417,6 @@ def get_stock_trade_plan(symbol):
         swing_high_60 = float(df['High'].tail(60).max())
         swing_high_120 = float(df['High'].max())
 
-        # Ambil daftar swing high di atas harga sekarang secara berurutan untuk TP1, TP2, TP3
         unique_highs = sorted(list(set(df['High'].tail(60))))
         tp_candidates = [h for h in unique_highs if h > c0]
         
@@ -268,26 +429,23 @@ def get_stock_trade_plan(symbol):
         else:
             tp1, tp2, tp3 = swing_high_60, swing_high_120, swing_high_120 * 1.05
 
-        # Rule Penolakan: Breakdown Support
         is_marubozu_red = (c0 < o0) and ((o0 - c0) / (h0 - l0 + 1e-5) > 0.85) and ((c0 - l0) / (h0 - l0 + 1e-5) < 0.05)
         is_new_low = c0 <= (swing_low * 1.005)
         is_breakdown = is_marubozu_red or is_new_low
 
-        # Perbandingan jarak harga close ke swing low vs swing high terdekat (TP1)
         dist_to_low = c0 - swing_low
         dist_to_high = tp1 - c0
 
-        # Penentuan Tipe Beli (BOW atau BOB) berdasarkan kedekatan
         if dist_to_low <= dist_to_high:
             plan_type = "BUY ON WEAKNESS (BOW)"
             buy_range_low = swing_low
             buy_range_high = min(c0, float(df['Low'].tail(5).mean()))
-            sl_price = subtract_ticks(swing_low, 3) # 2-3 tick di bawah swing low
+            sl_price = subtract_ticks(swing_low, 3)
             max_allowed_risk = 8.0
         else:
             plan_type = "BUY ON BREAKOUT (BOB)"
             buy_range_low = c0
-            buy_range_high = add_ticks(c0, 3) # Maksimal chasing 1-3 tick
+            buy_range_high = add_ticks(c0, 3)
             sl_price = subtract_ticks(tp1, 3) if tp1 > c0 else subtract_ticks(c0, 3)
             max_allowed_risk = 5.0
 
@@ -349,14 +507,13 @@ def get_ihsg_data():
     except:
         return 7000.0, 0.0
 
-# 7. Header Navigation
-col_logo, col_title, col_space, col_menu = st.columns([0.3, 2.2, 4.2, 2.3])
+# 7. Header Navigation (Logo + Title Home Button Link)
+col_brand, col_space, col_menu = st.columns([3, 3.7, 2.3])
 
-with col_logo:
-    st.markdown("<h3 style='margin:0; padding-top:0px; color: #00E676;'>Z</h3>", unsafe_allow_html=True)
-
-with col_title:
-    st.markdown("<h3 style='margin:0; padding-top:2px; font-size: 17px; color: #E2E8F0; font-weight: 700;'>Zio - Quant</h3>", unsafe_allow_html=True)
+with col_brand:
+    if st.button("📈 Zio - Quant", key="home_btn", help="Reset ke Home / Default View"):
+        reset_to_default()
+        st.rerun()
 
 with col_menu:
     selected_screener = st.selectbox(
@@ -445,11 +602,15 @@ with col_right:
     clean_ticker = "IHSG" if active_symbol in ["^JKSE", "IDX:COMPOSITE"] else active_symbol.replace("IDX:", "")
     tv_symbol = "IDX:COMPOSITE" if active_symbol in ["^JKSE", "IDX:COMPOSITE"] else active_symbol
 
+    # Ambil nama perusahaan dari dictionary
+    company_name = NAMA_PERUSAHAAN.get(clean_ticker, "Indeks Harga Saham Gabungan (Composite Index)" if clean_ticker == "IHSG" else clean_ticker)
+
     c_title, c_b1, c_b2 = st.columns([2.5, 1, 1])
     with c_title:
         st.markdown(f"""
             <div class="ticker-header-card">
                 <p class="ticker-header-text">Ticker : {clean_ticker}</p>
+                <p class="company-name-text">{company_name}</p>
             </div>
         """, unsafe_allow_html=True)
     with c_b1:
