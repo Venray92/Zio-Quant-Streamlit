@@ -82,6 +82,69 @@ st.markdown("""
         border: none !important;
         opacity: 0.8;
     }
+
+    /* CUSTOM CARDS UI MATCHING SCREENSHOTS */
+    .tp-card {
+        background-color: #111A24;
+        border: 1px solid #1E2D3D;
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 10px;
+    }
+    .tp-card-green {
+        background-color: #0D201A;
+        border: 1px solid #00E676;
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 10px;
+    }
+    .tp-card-red {
+        background-color: #261418;
+        border: 1px solid #FF5252;
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 10px;
+    }
+    .tp-card-blue {
+        background-color: #101E2E;
+        border: 1px solid #00B0FF;
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 10px;
+    }
+    .tp-badge-green {
+        background-color: #00E67622;
+        color: #00E676;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+    .tp-badge-red {
+        background-color: #FF525222;
+        color: #FF5252;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+    .tp-badge-blue {
+        background-color: #00B0FF22;
+        color: #00B0FF;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+    .tp-badge-gold {
+        background-color: #FFD70022;
+        color: #FFD700;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+        border: 1px solid #FFD700;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -435,6 +498,9 @@ def get_stock_trade_plan(symbol):
         h0 = float(df['High'].iloc[-1])
         l0 = float(df['Low'].iloc[-1])
         v0 = float(df['Volume'].iloc[-1])
+        c1 = float(df['Close'].iloc[-2])
+        chg_val = c0 - c1
+        chg_pct = (chg_val / c1) * 100
 
         # 1. Deteksi Swing Points Nyata (Structural Fractalling)
         sh_list, sl_list = find_swing_points(df, window=4)
@@ -503,23 +569,37 @@ def get_stock_trade_plan(symbol):
 
         vol_ma20 = float(df['Volume'].tail(20).mean())
 
+        risk_val = entry_worst - sl_price
+        reward_val_2 = tp2 - entry_worst
+
         return {
             "is_ihsg": False,
+            "raw_c0": c0,
+            "chg_val": chg_val,
+            "chg_pct": chg_pct,
             "price": f"Rp {int(c0):,}",
             "plan_type": plan_type,
             "is_breakdown": is_breakdown,
-            "buy_range": f"Rp {int(buy_range_low):,} – Rp {int(buy_range_high):,}",
+            "buy_range": f"{int(buy_range_low):,} – {int(buy_range_high):,}",
             "sl_price": f"Rp {int(sl_price):,}",
             "tp1": f"Rp {int(tp1):,}",
             "tp2": f"Rp {int(tp2):,}",
             "tp3": f"Rp {int(tp3):,}",
-            "risk_pct": f"{risk_pct}%",
-            "reward_pct_1": f"{reward_pct_1}%",
-            "reward_pct_2": f"{reward_pct_2}%",
-            "reward_pct_3": f"{reward_pct_3}%",
+            "raw_sl": int(sl_price),
+            "raw_entry_low": int(buy_range_low),
+            "raw_entry_high": int(buy_range_high),
+            "raw_tp1": int(tp1),
+            "raw_tp2": int(tp2),
+            "raw_tp3": int(tp3),
+            "risk_pct": f"-{risk_pct}%",
+            "reward_pct_1": f"+{reward_pct_1}%",
+            "reward_pct_2": f"+{reward_pct_2}%",
+            "reward_pct_3": f"+{reward_pct_3}%",
             "rr_1": rr_1,
             "rr_2": rr_2,
             "rr_3": rr_3,
+            "risk_val": f"Rp {int(risk_val):,}",
+            "reward_val_2": f"Rp {int(reward_val_2):,}",
             "vol_spike": (v0 >= vol_ma20),
             "entry_worst": entry_worst,
             "bow_range": f"Rp {int(bow_range_low):,} – Rp {int(bow_range_high):,}",
@@ -533,7 +613,10 @@ def get_stock_trade_plan(symbol):
             "buy_range": "-", "sl_price": "-", "tp1": "-", "tp2": "-", "tp3": "-",
             "risk_pct": "-", "reward_pct_1": "-", "reward_pct_2": "-", "reward_pct_3": "-",
             "rr_1": 0, "rr_2": 0, "rr_3": 0, "vol_spike": False, "entry_worst": 0,
-            "bow_range": "-", "bow_sl": "-", "bob_range": "-", "bob_sl": "-"
+            "bow_range": "-", "bow_sl": "-", "bob_range": "-", "bob_sl": "-",
+            "raw_c0": 0, "chg_val": 0, "chg_pct": 0, "raw_sl": 0, "raw_entry_low": 0, 
+            "raw_entry_high": 0, "raw_tp1": 0, "raw_tp2": 0, "raw_tp3": 0,
+            "risk_val": "-", "reward_val_2": "-"
         }
 
 @st.cache_data(ttl=600)
@@ -695,135 +778,179 @@ with col_right:
         """
         st.components.v1.html(tradingview_html, height=540)
 
-    # VIEW 2: TRADE PLAN MODUL (TERPERBARUI DENAGAN LOGIKA STRUCTURAL PRESI)
+    # VIEW 2: TRADE PLAN MODUL (TERPERBARUI TOTAL MENGIKUTI 3 SCREENSHOT LAYOUT)
     elif st.session_state.view_mode == "trade_plan":
         tp = get_stock_trade_plan(active_symbol)
         
         if tp["is_ihsg"]:
             st.info("ℹ️ **Indeks IHSG (Composite)** tidak memiliki Trade Plan individual. Silakan pilih salah satu saham dari watchlist sebelah kiri.")
         else:
-            # Bagian 1: Status Chart
-            st.markdown("##### 🟢 **1. STATUS CHART**")
+            # ==========================================
+            # BLOCK 1: STATUS CHART (Sesuai Gambar A)
+            # ==========================================
+            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-bottom: 8px;'>🎯 1. STATUS CHART</p>", unsafe_allow_html=True)
+            
             sc1, sc2 = st.columns(2)
             with sc1:
                 st.markdown(f"""
-                    <div style="background: #121E2B; border: 1px solid #243447; padding: 12px; border-radius: 8px;">
+                    <div class="tp-card">
                         <p style="color: #64748B; font-size: 11px; margin: 0;">Ticker IDX</p>
-                        <h3 style="color: #E2E8F0; margin: 2px 0; font-size: 20px;">{clean_ticker}</h3>
-                        <p style="color: #00E676; font-size: 11px; margin: 0;">🟢 Papan Utama</p>
+                        <h2 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{clean_ticker}</h2>
+                        <span class="tp-badge-green">● Papan Utama</span>
                     </div>
                 """, unsafe_allow_html=True)
             with sc2:
+                chg_color = "#00E676" if tp['chg_val'] >= 0 else "#FF5252"
+                chg_sign = "+" if tp['chg_val'] >= 0 else ""
                 st.markdown(f"""
-                    <div style="background: #121E2B; border: 1px solid #243447; padding: 12px; border-radius: 8px;">
+                    <div class="tp-card">
                         <p style="color: #64748B; font-size: 11px; margin: 0;">Last Price</p>
-                        <h3 style="color: #E2E8F0; margin: 2px 0; font-size: 20px;">{tp['price']}</h3>
-                        <p style="color: #00E676; font-size: 11px; margin: 0;">⚡ Volume Spike: {"Ya" if tp['vol_spike'] else "Normal"}</p>
+                        <h2 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{tp['price']}</h2>
+                        <span style="color: {chg_color}; font-size: 12px; font-weight: bold;">
+                            {chg_sign}{tp['chg_pct']:.2f}% ({chg_sign}{tp['chg_val']:,.2f})
+                        </span>
                     </div>
                 """, unsafe_allow_html=True)
 
+            # Setup Technical Status Card
+            setup_status = "SUPPORT RETEST / WEAKNESS" if "WEAKNESS" in tp['plan_type'] else "BREAKOUT ACCUMULATION"
+            score_badge = "B+" if tp['vol_spike'] else "B"
+            score_val = 75 if tp['vol_spike'] else 64
+            
             st.markdown(f"""
-                <div style="background: #121E2B; border: 1px solid #243447; padding: 10px 14px; border-radius: 8px; margin-top: 8px;">
-                    <p style="color: #64748B; font-size: 11px; margin: 0;">Rekomendasi Setup Utama (Posisi Terdekat)</p>
-                    <p style="color: #00E676; font-size: 14px; font-weight: bold; margin: 2px 0;">⚡ {tp['plan_type']}</p>
+                <div class="tp-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <p style="color: #64748B; font-size: 11px; margin: 0;">Status Teknikal Setup</p>
+                            <p style="color: #FFB300; font-size: 15px; font-weight: 800; margin: 4px 0;">● {tp['plan_type']} ({setup_status})</p>
+                            <p style="color: #94A3B8; font-size: 11px; margin: 0;">{"Perhatikan Volume & Konfirmasi Area Beli" if not tp['is_breakdown'] else "Ditolak oleh Rule D (Breakdown / Falling Knife)"}</p>
+                        </div>
+                        <div style="text-align: right;">
+                            <span class="tp-badge-blue">{score_badge}</span>
+                            <h3 style="color: #FFFFFF; margin: 4px 0;">{score_val} <span style="font-size: 12px; color: #64748B;">/100</span></h3>
+                        </div>
+                    </div>
                 </div>
             """, unsafe_allow_html=True)
 
             if tp["is_breakdown"]:
-                st.error("⛔ **RULE PENOLAKAN:** Saham Breakdown Support (Marubozu Merah / New Low). Status: **SKIP / WAIT AND SEE**.")
+                st.error("⛔ **RULE D INVALIDATION:** Saham terdeteksi Breakdown Support / Solid Red Marubozu. Status: **SKIP / DILARANG ENTRY**.")
 
-            # Bagian 2: Trading Plan Detail
-            st.markdown("##### 🔵 **2. TRADING PLAN DETAIL (REKOMENDASI SETUP)**")
+            # ==========================================
+            # BLOCK 2: TRADING PLAN DETAIL (Sesuai Gambar B)
+            # ==========================================
+            st.markdown("<p style='font-size: 13px; color: #00B0FF; font-weight: bold; margin-top: 14px; margin-bottom: 8px;'>📋 2. TRADING PLAN DETAIL</p>", unsafe_allow_html=True)
             
+            # Row 1: Entry & Stop Loss
             d1, d2 = st.columns(2)
             with d1:
                 st.markdown(f"""
-                    <div style="background: #121E2B; border: 1px solid #1E3A2F; padding: 12px; border-radius: 8px; margin-bottom: 8px;">
-                        <p style="color: #00E676; font-size: 11px; font-weight: bold; margin: 0;">🟢 AREA ENTRY ({tp['plan_type']})</p>
-                        <h4 style="color: #E2E8F0; margin: 4px 0;">{tp['buy_range']}</h4>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Area eksekusi beli presisi sesuai struktur Swing.</p>
+                    <div class="tp-card-green">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: #00E676; font-size: 12px; font-weight: bold;">✔ AREA ENTRY</span>
+                            <span class="tp-badge-green">Buy Zone</span>
+                        </div>
+                        <h3 style="color: #FFFFFF; margin: 8px 0; font-weight: 800;">{tp['buy_range']}</h3>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Akumulasi bertahap di area support terdekat.</p>
                     </div>
                 """, unsafe_allow_html=True)
             with d2:
                 st.markdown(f"""
-                    <div style="background: #121E2B; border: 1px solid #3A1E1E; padding: 12px; border-radius: 8px; margin-bottom: 8px;">
-                        <p style="color: #FF5252; font-size: 11px; font-weight: bold; margin: 0;">🛑 STOP LOSS ({tp['risk_pct']})</p>
-                        <h4 style="color: #E2E8F0; margin: 4px 0;">{tp['sl_price']}</h4>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Cut loss disiplin jika closing menembus level ini.</p>
+                    <div class="tp-card-red">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: #FF5252; font-size: 12px; font-weight: bold;">⚠️ STOP LOSS</span>
+                            <span class="tp-badge-red">{tp['risk_pct']}</span>
+                        </div>
+                        <h3 style="color: #FF5252; margin: 8px 0; font-weight: 800;">{tp['sl_price']}</h3>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Cut loss disiplin bila closing candle di bawah level ini.</p>
                     </div>
                 """, unsafe_allow_html=True)
 
-            # Referensi Lengkap Pembagian Parameter Parameter BOW vs BOB
-            st.markdown("<p style='font-size: 11px; color: #64748B; font-weight: bold; margin-top: 4px; margin-bottom: 4px;'>PARAMETER LENGKAP STRATEGI (BOW & BOB):</p>", unsafe_allow_html=True)
-            ref_col1, ref_col2 = st.columns(2)
-            with ref_col1:
-                st.caption(f"📉 **Buy On Weakness (BOW)**:\nArea Beli: **{tp['bow_range']}** | SL: **{tp['bow_sl']}**")
-            with ref_col2:
-                st.caption(f"🚀 **Buy On Breakout (BOB)**:\nArea Beli: **{tp['bob_range']}** | SL: **{tp['bob_sl']}**")
-
-            # Target Resistance Swing High (TP)
-            st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
-            t1, t2, t3 = st.columns(3)
+            # Row 2: Target 1 & Target 2
+            t1, t2 = st.columns(2)
             with t1:
                 st.markdown(f"""
-                    <div style="background: #121E2B; border: 1px solid #243447; padding: 10px; border-radius: 8px;">
-                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 1 (Swing High 1) | +{tp['reward_pct_1']}</p>
-                        <h5 style="color: #E2E8F0; margin: 2px 0;">{tp['tp1']}</h5>
-                        <p style="color: #94A3B8; font-size: 9px; margin: 0;">Target profit pertama.</p>
+                    <div class="tp-card-blue">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: #00B0FF; font-size: 12px; font-weight: bold;">TARGET 1 (TP 1)</span>
+                            <span class="tp-badge-blue">{tp['reward_pct_1']}</span>
+                        </div>
+                        <h3 style="color: #FFFFFF; margin: 8px 0; font-weight: 800;">{tp['tp1']}</h3>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Resistance minor. Ambil profit sebagian (30-50%).</p>
                     </div>
                 """, unsafe_allow_html=True)
             with t2:
                 st.markdown(f"""
-                    <div style="background: #121E2B; border: 1px solid #243447; padding: 10px; border-radius: 8px;">
-                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 2 (Swing High 2) | +{tp['reward_pct_2']}</p>
-                        <h5 style="color: #E2E8F0; margin: 2px 0;">{tp['tp2']}</h5>
-                        <p style="color: #94A3B8; font-size: 9px; margin: 0;">Target profit kedua.</p>
-                    </div>
-                """, unsafe_allow_html=True)
-            with t3:
-                st.markdown(f"""
-                    <div style="background: #121E2B; border: 1px solid #243447; padding: 10px; border-radius: 8px;">
-                        <p style="color: #64748B; font-size: 10px; margin: 0;">TP 3 (Swing High 3) | +{tp['reward_pct_3']}</p>
-                        <h5 style="color: #E2E8F0; margin: 2px 0;">{tp['tp3']}</h5>
-                        <p style="color: #94A3B8; font-size: 9px; margin: 0;">Target runner profit.</p>
+                    <div class="tp-card-green">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: #00E676; font-size: 12px; font-weight: bold;">TARGET 2 (TP 2)</span>
+                            <span class="tp-badge-green">{tp['reward_pct_2']}</span>
+                        </div>
+                        <h3 style="color: #00E676; margin: 8px 0; font-weight: 800;">{tp['tp2']}</h3>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Target utama swing (Resistance kuat / Measured Move).</p>
                     </div>
                 """, unsafe_allow_html=True)
 
-            # Bagian 3: Rasio R:R tiap target
-            st.markdown("##### 🟡 **3. RASIO R:R TIAP TARGET**")
-            
-            rr1_status = f"1 : {tp['rr_1']}" if tp['rr_1'] >= 2.0 else f"1 : {tp['rr_1']} (TIDAK SESUAI R:R - SKIP)"
+            # Row 3: Target 3
             st.markdown(f"""
-                <div style="background: #121E2B; border: 1px solid #243447; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; display: flex; justify-content: space-between;">
-                    <span style="color: #E2E8F0; font-size: 12px;">🔵 Target 1 (Konservatif)</span>
-                    <span style="color: {'#00E676' if tp['rr_1'] >= 2.0 else '#FF5252'}; font-weight: bold; font-size: 12px;">{rr1_status}</span>
-                </div>
-                <div style="background: #121E2B; border: 1px solid #243447; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; display: flex; justify-content: space-between;">
-                    <span style="color: #E2E8F0; font-size: 12px;">🟢 Target 2 (Swing Utama)</span>
-                    <span style="color: #00E676; font-weight: bold; font-size: 12px;">1 : {tp['rr_2']}</span>
-                </div>
-                <div style="background: #121E2B; border: 1px solid #243447; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between;">
-                    <span style="color: #E2E8F0; font-size: 12px;">🔵 Target 3 (Runner Profit)</span>
-                    <span style="color: #00E676; font-weight: bold; font-size: 12px;">1 : {tp['rr_3']}</span>
+                <div class="tp-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="color: #00B0FF; font-size: 12px; font-weight: bold;">TARGET 3 (TP 3 - EXTENDED)</span>
+                            <h3 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{tp['tp3']}</h3>
+                        </div>
+                        <span class="tp-badge-blue" style="font-size: 13px;">{tp['reward_pct_3']}</span>
+                    </div>
                 </div>
             """, unsafe_allow_html=True)
 
-            st.info("💡 **Tips Money Management:** Jika R:R minimal 1:2 tercapai pada TP1, Anda hanya membutuhkan win rate 40% untuk tetap menghasilkan profit jangka panjang yang konsisten!")
+            # Roadmap Eksekusi Harga Horizontal (Atas Gambar C)
+            st.markdown(f"""
+                <div class="tp-card" style="padding: 10px 14px;">
+                    <p style="color: #64748B; font-size: 11px; margin-bottom: 8px;">Roadmap Eksekusi Harga:</p>
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: bold;">
+                        <span style="color: #FF5252;">● SL: {tp['raw_sl']:,} ({tp['risk_pct']})</span>
+                        <span style="color: #64748B;">➔</span>
+                        <span style="color: #00E676;">● Entry: {tp['buy_range']}</span>
+                        <span style="color: #64748B;">➔</span>
+                        <span style="color: #00B0FF;">● TP1: {tp['raw_tp1']:,} ({tp['reward_pct_1']})</span>
+                        <span style="color: #64748B;">➔</span>
+                        <span style="color: #00E676;">● TP2: {tp['raw_tp2']:,} ({tp['reward_pct_2']})</span>
+                        <span style="color: #64748B;">➔</span>
+                        <span style="color: #00B0FF;">● TP3: {tp['raw_tp3']:,} ({tp['reward_pct_3']})</span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
 
-            # Simulasi Alokasi Modal Trading
-            st.markdown("##### 💵 **Simulasi Alokasi Modal Trading**")
-            modal = st.number_input("Masukkan Total Capital / Modal (Rp):", min_value=1_000_000, value=10_000_000, step=1_000_000)
+            # ==========================================
+            # BLOCK 3: RASIO R:R (Sesuai Gambar C)
+            # ==========================================
+            st.markdown("<p style='font-size: 13px; color: #FFD700; font-weight: bold; margin-top: 14px; margin-bottom: 8px;'>⚡ 3. RASIO R:R (RISK TO REWARD RATIO)</p>", unsafe_allow_html=True)
             
-            entry_price = tp["entry_worst"]
-            if entry_price > 0:
-                total_lot = int(modal // (entry_price * 100))
-                total_buy = total_lot * entry_price * 100
-                sl_val = int(tp["sl_price"].replace("Rp ", "").replace(".", "").replace(",", "")) if isinstance(tp["sl_price"], str) else 0
-                tp1_val = int(tp["tp1"].replace("Rp ", "").replace(".", "").replace(",", "")) if isinstance(tp["tp1"], str) else 0
-                max_loss_rp = total_lot * 100 * (entry_price - sl_val)
-                max_gain_rp = total_lot * 100 * (tp1_val - entry_price)
-
-                c_m1, c_m2, c_m3 = st.columns(3)
-                c_m1.info(f"**Maksimal Pembelian:**\n\n**{total_lot} Lot** (Rp {int(total_buy):,})")
-                c_m2.error(f"**Maksimal Risiko (Loss SL):**\n\n- Rp {int(max_loss_rp):,}")
-                c_m3.success(f"**Potensi Profit (TP1):**\n\n+ Rp {int(max_gain_rp):,}")
+            rr_status = "Sangat Menarik" if tp['rr_2'] >= 3.0 else ("Menarik" if tp['rr_2'] >= 2.0 else "Kurang Ideal")
+            
+            st.markdown(f"""
+                <div class="tp-card" style="border: 1px solid #FFD700;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: #64748B; font-size: 12px; font-weight: bold;">RASIO UTAMA (KE TP 2)</span>
+                        <span class="tp-badge-gold">{rr_status}</span>
+                    </div>
+                    <h1 style="color: #FFD700; font-size: 42px; font-weight: 900; margin: 6px 0;">1 : {tp['rr_2']}</h1>
+                    <p style="color: #E2E8F0; font-size: 12px; margin-bottom: 12px;">
+                        Setiap risiko <b>1x</b> menawarkan potensi imbal hasil <b>{tp['rr_2']}x</b> lipat ke Target 2.
+                    </p>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                        <span style="color: #FF5252;">Resiko: {tp['risk_val']}</span>
+                        <span style="color: #00E676;">Reward: {tp['reward_val_2']}</span>
+                    </div>
+                    <!-- Combined Progress Bar -->
+                    <div style="width: 100%; height: 8px; background-color: #00E676; border-radius: 4px; overflow: hidden; display: flex;">
+                        <div style="width: 30%; height: 100%; background-color: #FF5252;"></div>
+                        <div style="width: 70%; height: 100%; background-color: #00E676;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; color: #64748B; margin-top: 4px;">
+                        <span>Stop Loss ({tp['risk_pct']})</span>
+                        <span>Target 2 ({tp['reward_pct_2']})</span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
