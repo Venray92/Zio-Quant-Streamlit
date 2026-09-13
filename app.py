@@ -70,7 +70,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Inisialisasi Session State (Agar Terkontrol Saat Refresh/Home)
+# 2. Inisialisasi Session State
 if 'active_ticker' not in st.session_state:
     st.session_state.active_ticker = "IDX:COMPOSITE"
 
@@ -363,8 +363,8 @@ with col_left:
         with st.spinner("Memindai pasar..."):
             df_bull, df_bear = run_screener(SAHAM_LIST)
 
-        # NATIVE CONTAINER STREAMLIT: Mengunci Tinggi + Scrollbar Internal Otomatis
-        with st.container(height=485):
+        # HEIGHT DISESUAIKAN MENJADI 425 PX BIAR PAS SEJAJAR BAWAH CHART
+        with st.container(height=425):
             if st.session_state.watchlist_tab == "bull":
                 if not df_bull.empty:
                     for index, row in df_bull.iterrows():
@@ -415,7 +415,7 @@ with col_right:
 
     st.markdown("<div style='margin-bottom: 2px;'></div>", unsafe_allow_html=True)
 
-    # VIEW 1: TRADINGVIEW CHART (Sejajar sempurna dengan container kiri)
+    # VIEW 1: TRADINGVIEW CHART (Sejajar sempurna)
     if st.session_state.view_mode == "chart":
         tradingview_html = f"""
         <div class="tradingview-widget-container" style="height:535px;width:100%">
