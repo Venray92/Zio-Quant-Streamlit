@@ -364,7 +364,7 @@ with col_left:
             df_bull, df_bear = run_screener(SAHAM_LIST)
 
         # HEIGHT DISESUAIKAN MENJADI 448 PX SUPAYA TEPAT PRESISI DENGAN ALAS CHART TRADINGVIEW
-        with st.container(height=448):
+        with st.container(height=440):
             if st.session_state.watchlist_tab == "bull":
                 if not df_bull.empty:
                     for index, row in df_bull.iterrows():
