@@ -49,7 +49,7 @@ if fetch_btn:
             # Contoh tarik data menggunakan yfinance
             df = yf.download(ticker_input, period="6mo", interval="1d", progress=False)
             if not df.empty:
-                st.success(Berhasil memuat data {ticker_input}!)
+                st.success(f"Berhasil memuat data {ticker_input}!")
                 st.subheader("📊 Data Historis Terakhir")
                 st.dataframe(df.tail(10), use_container_width=True)
             else:
