@@ -829,66 +829,86 @@ with col_right:
         if tp["is_ihsg"]:
             st.info("ℹ️ Indeks IHSG tidak memiliki Trade Plan individual.")
         else:
-            # BLOCK 1: STATUS
-            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-bottom: 8px;'>🎯 1. STATUS CHART & EKSEKUSI</p>", unsafe_allow_html=True)
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown(f"""
-        <div class="tp-card">
-            <p style="color: #64748B; font-size: 11px; margin: 0;">Ticker IDX</p>
-            <h2 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{tp['ticker']}</h2>
-            <p style="color: #64748B; font-size: 11px; margin: 0;">Harga Close: <b>{tp['close_price']}</b></p>
-        </div>
-    """, unsafe_allow_html=True)
-with c2:
-    status_color = "#00E676" if tp['rule_d_status'] == "PASSED" else "#FF5252"
-    st.markdown(f"""
-        <div class="tp-card">
-            <p style="color: #64748B; font-size: 11px; margin: 0;">Status Rule D / Validasi</p>
-            <h3 style="color: {status_color}; margin: 4px 0; font-weight: 700;">{tp['rule_d_status']}</h3>
-            <p style="color: #94A3B8; font-size: 11px; margin: 0;">{tp['rule_d_reason']}</p>
-        </div>
-    """, unsafe_allow_html=True)
+            # ==========================================
+# UI RENDERING: TRADE PLAN VIEW (FIXED)
+# ==========================================
+tp = get_stock_trade_plan(active_symbol)
 
-           # 2. HARGA & PARAMETER TRADE PLAN (BLOCK 2)
-            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>📊 2. HARGA & PARAMETER TRADE PLAN</p>", unsafe_allow_html=True)
-            pc1, pc2, pc3 = st.columns(3)
-            with pc1:
-                st.markdown(f"""
-                    <div class="tp-card-blue">
-                        <p style="color: #00B0FF; font-size: 11px; margin: 0; font-weight: bold;">STRATEGI: {tp['selected_strategy']}</p>
-                        <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['entry_range']}</h3>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Worst Entry: {tp['worst_case_entry']}</p>
-                    </div>
-                """, unsafe_allow_html=True)
-            with pc2:
-                st.markdown(f"""
-                    <div class="tp-card-red">
-                        <p style="color: #FF5252; font-size: 11px; margin: 0; font-weight: bold;">STOP LOSS (SL)</p>
-                        <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['sl_price']}</h3>
-                        <p style="color: #FF5252; font-size: 11px; margin: 0;">Max Risk: {tp['max_risk_pct']}</p>
-                    </div>
-                """, unsafe_allow_html=True)
-            with pc3:
-                st.markdown(f"""
-                    <div class="tp-card-green">
-                        <p style="color: #00E676; font-size: 11px; margin: 0; font-weight: bold;">EVALUASI RISIKO</p>
-                        <h4 style="color: #FFFFFF; margin: 6px 0;">{tp['max_risk_status']}</h4>
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">{tp['volume_note']}</p>
-                    </div>
-                """, unsafe_allow_html=True)
+if tp.get("is_ihsg"):
+    st.info("ℹ️ Indeks IHSG tidak memiliki Trade Plan individual.")
+elif "error" in tp:
+    st.error(f"⚠️ Gagal memuat data: {tp['error']}")
+else:
+    # --------------------------------------------------
+    # BLOCK 1: OVERVIEW & STATUS RULE D
+    # --------------------------------------------------
+    st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-bottom: 8px;'>🎯 1. STATUS CHART & EKSEKUSI</p>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"""
+            <div class="tp-card">
+                <p style="color: #64748B; font-size: 11px; margin: 0;">Ticker IDX</p>
+                <h2 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{tp['ticker']}</h2>
+                <p style="color: #64748B; font-size: 11px; margin: 0;">Harga Close: <b>{tp['close_price']}</b></p>
+            </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        status_color = "#00E676" if tp['rule_d_status'] == "PASSED" else "#FF5252"
+        st.markdown(f"""
+            <div class="tp-card">
+                <p style="color: #64748B; font-size: 11px; margin: 0;">Status Rule D / Validasi</p>
+                <h3 style="color: {status_color}; margin: 4px 0; font-weight: 700;">{tp['rule_d_status']}</h3>
+                <p style="color: #94A3B8; font-size: 11px; margin: 0;">{tp['rule_d_reason']}</p>
+            </div>
+        """, unsafe_allow_html=True)
 
-            # 3. SCALING OUT TARGET & R:R (BLOCK 3)
-            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>🎯 3. SCALING OUT TARGET & RATIO R:R</p>", unsafe_allow_html=True)
-            tc1, tc2, tc3 = st.columns(3)
-            cols = [tc1, tc2, tc3]
-            for idx, target in enumerate(tp['targets']):
-                with cols[idx]:
-                    st.markdown(f"""
-                        <div class="tp-card">
-                            <p style="color: #94A3B8; font-size: 11px; margin: 0;">{target['target_label']}</p>
-                            <h3 style="color: #FFFFFF; margin: 2px 0;">{target['target_price']}</h3>
-                            <p style="color: #00E676; font-size: 11px; font-weight: bold; margin: 2px 0;">Potensi: {target['potential_gain_pct']} | R:R {target['rr_ratio']}</p>
-                            <span class="tp-badge-green" style="font-size: 10px;">{target['target_basis']}</span>
-                        </div>
-                    """, unsafe_allow_html=True)
+    # CHECKPOINT: HANYA TAMPILKAN BLOCK 2 & 3 JIKA STATUS PASSED
+    if tp['rule_d_status'] == "REJECTED":
+        st.warning("⚠️ **TRADE PLAN DITOLAK**: Saham ini tidak memenuhi syarat masuk (Breakdown Support / Falling Knife). Disarankan **WAIT AND SEE**.")
+    else:
+        # --------------------------------------------------
+        # BLOCK 2: HARGA & PARAMETER TRADE PLAN
+        # --------------------------------------------------
+        st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>📊 2. HARGA & PARAMETER TRADE PLAN</p>", unsafe_allow_html=True)
+        pc1, pc2, pc3 = st.columns(3)
+        with pc1:
+            st.markdown(f"""
+                <div class="tp-card-blue">
+                    <p style="color: #00B0FF; font-size: 11px; margin: 0; font-weight: bold;">STRATEGI: {tp['selected_strategy']}</p>
+                    <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['entry_range']}</h3>
+                    <p style="color: #94A3B8; font-size: 11px; margin: 0;">Worst Entry: {tp['worst_case_entry']}</p>
+                </div>
+            """, unsafe_allow_html=True)
+        with pc2:
+            st.markdown(f"""
+                <div class="tp-card-red">
+                    <p style="color: #FF5252; font-size: 11px; margin: 0; font-weight: bold;">STOP LOSS (SL)</p>
+                    <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['sl_price']}</h3>
+                    <p style="color: #FF5252; font-size: 11px; margin: 0;">Max Risk: {tp['max_risk_pct']}</p>
+                </div>
+            """, unsafe_allow_html=True)
+        with pc3:
+            st.markdown(f"""
+                <div class="tp-card-green">
+                    <p style="color: #00E676; font-size: 11px; margin: 0; font-weight: bold;">EVALUASI RISIKO</p>
+                    <h4 style="color: #FFFFFF; margin: 6px 0;">{tp['max_risk_status']}</h4>
+                    <p style="color: #94A3B8; font-size: 11px; margin: 0;">{tp['volume_note']}</p>
+                </div>
+            """, unsafe_allow_html=True)
+
+        # --------------------------------------------------
+        # BLOCK 3: SCALING OUT TARGET & RATIO R:R
+        # --------------------------------------------------
+        st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>🎯 3. SCALING OUT TARGET & RATIO R:R</p>", unsafe_allow_html=True)
+        tc1, tc2, tc3 = st.columns(3)
+        cols = [tc1, tc2, tc3]
+        for idx, target in enumerate(tp['targets']):
+            with cols[idx]:
+                st.markdown(f"""
+                    <div class="tp-card">
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">{target['target_label']}</p>
+                        <h3 style="color: #FFFFFF; margin: 2px 0;">{target['target_price']}</h3>
+                        <p style="color: #00E676; font-size: 11px; font-weight: bold; margin: 2px 0;">Potensi: {target['potential_gain_pct']} | R:R {target['rr_ratio']}</p>
+                        <span class="tp-badge-green" style="font-size: 10px;">{target['target_basis']}</span>
+                    </div>
+                """, unsafe_allow_html=True)
