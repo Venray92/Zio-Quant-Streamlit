@@ -505,7 +505,9 @@ def get_stock_trade_plan(symbol):
         if df.empty or len(df) < 25:
             return {"is_ihsg": False, "error": "Data historis tidak cukup."}
 
-        df_base = df.iloc[-21:-1] 
+        # ----------------------------------------------------------------------
+        # 1. EVALUASI MIKRO BASE (10 HARI TERAKHIR) & SWING HIGH/LOW
+        # ----------------------------------------------------------------------
         c0 = round_to_bei_tick(float(df['Close'].iloc[-1]))
         o0 = round_to_bei_tick(float(df['Open'].iloc[-1]))
         h0 = round_to_bei_tick(float(df['High'].iloc[-1]))
@@ -513,18 +515,21 @@ def get_stock_trade_plan(symbol):
         v0 = float(df['Volume'].iloc[-1])
         v_ma20 = float(df['Volume'].tail(20).mean())
 
-        base_wick_high = round_to_bei_tick(float(df_base['High'].max()))
-        base_wick_low = round_to_bei_tick(float(df_base['Low'].min()))
-        base_low_body = round_to_bei_tick(float(df_base[['Open', 'Close']].min().min()))
+        # Mengambil mikro base 10 hari terakhir (bukan 20 hari agar tidak terdistorsi swing high lama)
+        df_micro_base = df.tail(10)
+        micro_high = round_to_bei_tick(float(df_micro_base['High'].max()))
+        micro_low = round_to_bei_tick(float(df_micro_base['Low'].min()))
+        micro_body_low = round_to_bei_tick(float(df_micro_base[['Open', 'Close']].min().min()))
 
-        # ----------------------------------------------------------------------
-        # 1. PERBAIKAN LOGIKA BOB VS BOW BERDASARKAN PROPORSI RENTANG HARGA (> 50%)
-        # ----------------------------------------------------------------------
-        base_range = base_wick_high - base_wick_low
-        price_position_pct = ((c0 - base_wick_low) / base_range) if base_range > 0 else 0.5
-        
-        # Jika posisi harga > 50% dari rentang base ATAU sudah breakout wick high -> BOB
-        is_bob = (price_position_pct >= 0.50) or (c0 >= base_wick_high)
+        # Mengambil swing high horizontal nyata untuk Target Profit
+        swing_highs, _ = find_swing_points(df, window=2)
+
+        # Hitung posisi harga relatif terhadap Mikro Base terdekat
+        micro_range = micro_high - micro_low
+        price_pos = ((c0 - micro_low) / micro_range) if micro_range > 0 else 0.5
+
+        # JIKA HARGA > 50% RENTANG MIKRO BASE ATAU DEKAT RESISTEN LOKAL -> BOB
+        is_bob = (price_pos >= 0.50) or (c0 >= micro_high)
 
         # ----------------------------------------------------------------------
         # 2. EVALUASI RULE D (PROTEKSI RISIKO)
@@ -532,7 +537,7 @@ def get_stock_trade_plan(symbol):
         rejected = False
         rejection_reasons = []
 
-        if c0 < base_wick_low:
+        if c0 < micro_low:
             rejected = True
             rejection_reasons.append("Breakdown Support Utama (Close < Wick Low Base)")
 
@@ -571,34 +576,33 @@ def get_stock_trade_plan(symbol):
             }
 
         # ----------------------------------------------------------------------
-        # 3. PENETAPAN STRATEGI ENTRY & STOP LOSS
+        # 3. STRATEGI ENTRY & STOP LOSS (BOB VS BOW)
         # ----------------------------------------------------------------------
         if is_bob:
             selected_strategy = "BUY ON BREAKOUT (BOB)"
             vol_passed = v0 > v_ma20
             vol_note = "✅ Volume > MA20 (Valid)" if vol_passed else "⚠️ Volume < MA20 (Weak)"
             
-            # Entry pada area konfirmasi breakout High Base
-            entry_low = base_wick_high
-            entry_high = add_ticks(base_wick_high, 2)
+            entry_low = micro_high
+            entry_high = add_ticks(micro_high, 2)
             worst_case_entry = entry_high
-            sl_price = subtract_ticks(base_wick_low, 2)
+            sl_price = subtract_ticks(micro_low, 2)
             max_risk_limit = 6.0
         else:
             selected_strategy = "BUY ON WEAKNESS (BOW)"
             vol_note = "ℹ️ Pelemahan Volume (Dry Up)"
-            tick_sz = get_tick_size(base_low_body)
-            gap_ticks = int((base_low_body - base_wick_low) / tick_sz)
+            tick_sz = get_tick_size(micro_body_low)
+            gap_ticks = int((micro_body_low - micro_low) / tick_sz)
             
             if gap_ticks > 5:
-                entry_low = base_wick_low
-                entry_high = add_ticks(base_wick_low, 5)
+                entry_low = micro_low
+                entry_high = add_ticks(micro_low, 5)
             else:
-                entry_low = base_wick_low
-                entry_high = base_low_body
+                entry_low = micro_low
+                entry_high = micro_body_low
                 
             worst_case_entry = entry_high
-            sl_price = subtract_ticks(base_wick_low, 3)
+            sl_price = subtract_ticks(micro_low, 3)
             max_risk_limit = 8.0
 
         risk_pts = worst_case_entry - sl_price
@@ -606,35 +610,31 @@ def get_stock_trade_plan(symbol):
         risk_status = "✅ RISIKO AMAN" if max_risk_pct <= max_risk_limit else f"⚠️ RISIKO TINGGI (> {max_risk_limit}%)"
 
         # ----------------------------------------------------------------------
-        # 4. PERBAIKAN RESISTEN & TARGET PROFIT (MENCARI RESISTEN LOKAL NYATA)
+        # 4. FIX TARGET PROFIT (MENCARI RESISTEN 2.610 & 2.820)
         # ----------------------------------------------------------------------
-        swing_highs, _ = find_swing_points(df, window=3)
-        # Filter swing high yang berada di atas harga entry terburuk
-        valid_resistances = sorted([r for r in swing_highs if r > worst_case_entry])
+        # Cari semua swing high yang berada DI ATAS harga High konsolidasi saat ini
+        valid_resists = sorted(list(set([r for r in swing_highs if r > micro_high])))
 
-        # TP 1: Resisten Terdekat Nyata (Jika tidak ada, fallback ke High 40 hari)
-        if valid_resistances:
-            tp1 = valid_resistances[0]
-        else:
-            tp1 = round_to_bei_tick(float(df.tail(40)['High'].max()))
+        # Jika swing high otomatis tidak ketemu 2610, ambil resisten horizontal dari struktur data 40 hari
+        if not valid_resists:
+            df_40 = df.tail(40)
+            resists_in_range = df_40[df_40['High'] > micro_high]['High'].values
+            valid_resists = sorted(list(set([round_to_bei_tick(r) for r in resists_in_range])))
 
-        # TP 2: Resisten Mayor berikutnya atau Measured Move
-        if len(valid_resistances) > 1:
-            tp2 = valid_resistances[1]
-        else:
-            tp2 = round_to_bei_tick(worst_case_entry + base_range)
+        # Target 1: Resisten Terdekat (Misal 2.610)
+        tp1 = valid_resists[0] if len(valid_resists) > 0 else round_to_bei_tick(worst_case_entry + micro_range)
+
+        # Target 2: Resisten Mayor Berikutnya (Misal 2.820)
+        tp2 = valid_resists[1] if len(valid_resists) > 1 else round_to_bei_tick(tp1 + micro_range)
         tp2 = max(tp2, add_ticks(tp1, 5))
 
-        # TP 3: Resisten Atas / Fibonacci Extension
-        if len(valid_resistances) > 2:
-            tp3 = valid_resistances[2]
-        else:
-            tp3 = round_to_bei_tick(worst_case_entry + (base_range * 1.618))
+        # Target 3: Target Ekspansi / Resisten Atas
+        tp3 = valid_resists[2] if len(valid_resists) > 2 else round_to_bei_tick(worst_case_entry + (micro_range * 1.618))
         tp3 = max(tp3, add_ticks(tp2, 5))
 
         raw_targets = [
-            ("Target 1 (Fast Swing)", tp1, "Resisten Terdekat (Swing High)", "Fast Swing"),
-            ("Target 2 (Medium Swing)", tp2, "Resisten Mayor", "Medium Swing"),
+            ("Target 1 (Fast Swing)", tp1, "Resisten Terdekat (Horizontal)", "Fast Swing"),
+            ("Target 2 (Medium Swing)", tp2, "Resisten Mayor (Swing High)", "Medium Swing"),
             ("Target 3 (Long Swing)", tp3, "Target Ekspansi Base", "Trend Following")
         ]
 
