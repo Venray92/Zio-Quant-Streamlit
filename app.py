@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import ta
+import streamlit.components.v1 as components
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -505,9 +506,6 @@ def get_stock_trade_plan(symbol):
         if df.empty or len(df) < 25:
             return {"is_ihsg": False, "error": "Data historis tidak cukup."}
 
-        # ----------------------------------------------------------------------
-        # 1. EVALUASI MIKRO BASE (10 HARI TERAKHIR) & SWING HIGH/LOW
-        # ----------------------------------------------------------------------
         c0 = round_to_bei_tick(float(df['Close'].iloc[-1]))
         o0 = round_to_bei_tick(float(df['Open'].iloc[-1]))
         h0 = round_to_bei_tick(float(df['High'].iloc[-1]))
@@ -515,25 +513,17 @@ def get_stock_trade_plan(symbol):
         v0 = float(df['Volume'].iloc[-1])
         v_ma20 = float(df['Volume'].tail(20).mean())
 
-        # Mengambil mikro base 10 hari terakhir (bukan 20 hari agar tidak terdistorsi swing high lama)
         df_micro_base = df.tail(10)
         micro_high = round_to_bei_tick(float(df_micro_base['High'].max()))
         micro_low = round_to_bei_tick(float(df_micro_base['Low'].min()))
         micro_body_low = round_to_bei_tick(float(df_micro_base[['Open', 'Close']].min().min()))
 
-        # Mengambil swing high horizontal nyata untuk Target Profit
         swing_highs, _ = find_swing_points(df, window=2)
 
-        # Hitung posisi harga relatif terhadap Mikro Base terdekat
         micro_range = micro_high - micro_low
         price_pos = ((c0 - micro_low) / micro_range) if micro_range > 0 else 0.5
-
-        # JIKA HARGA > 50% RENTANG MIKRO BASE ATAU DEKAT RESISTEN LOKAL -> BOB
         is_bob = (price_pos >= 0.50) or (c0 >= micro_high)
 
-        # ----------------------------------------------------------------------
-        # 2. EVALUASI RULE D (PROTEKSI RISIKO)
-        # ----------------------------------------------------------------------
         rejected = False
         rejection_reasons = []
 
@@ -575,9 +565,6 @@ def get_stock_trade_plan(symbol):
                 "targets": []
             }
 
-        # ----------------------------------------------------------------------
-        # 3. STRATEGI ENTRY & STOP LOSS (BOB VS BOW)
-        # ----------------------------------------------------------------------
         if is_bob:
             selected_strategy = "BUY ON BREAKOUT (BOB)"
             vol_passed = v0 > v_ma20
@@ -609,26 +596,16 @@ def get_stock_trade_plan(symbol):
         max_risk_pct = round((risk_pts / worst_case_entry) * 100, 2)
         risk_status = "✅ RISIKO AMAN" if max_risk_pct <= max_risk_limit else f"⚠️ RISIKO TINGGI (> {max_risk_limit}%)"
 
-        # ----------------------------------------------------------------------
-        # 4. FIX TARGET PROFIT (MENCARI RESISTEN 2.610 & 2.820)
-        # ----------------------------------------------------------------------
-        # Cari semua swing high yang berada DI ATAS harga High konsolidasi saat ini
         valid_resists = sorted(list(set([r for r in swing_highs if r > micro_high])))
 
-        # Jika swing high otomatis tidak ketemu 2610, ambil resisten horizontal dari struktur data 40 hari
         if not valid_resists:
             df_40 = df.tail(40)
             resists_in_range = df_40[df_40['High'] > micro_high]['High'].values
             valid_resists = sorted(list(set([round_to_bei_tick(r) for r in resists_in_range])))
 
-        # Target 1: Resisten Terdekat (Misal 2.610)
         tp1 = valid_resists[0] if len(valid_resists) > 0 else round_to_bei_tick(worst_case_entry + micro_range)
-
-        # Target 2: Resisten Mayor Berikutnya (Misal 2.820)
         tp2 = valid_resists[1] if len(valid_resists) > 1 else round_to_bei_tick(tp1 + micro_range)
         tp2 = max(tp2, add_ticks(tp1, 5))
-
-        # Target 3: Target Ekspansi / Resisten Atas
         tp3 = valid_resists[2] if len(valid_resists) > 2 else round_to_bei_tick(worst_case_entry + (micro_range * 1.618))
         tp3 = max(tp3, add_ticks(tp2, 5))
 
@@ -792,90 +769,108 @@ with col_right:
             st.session_state.view_mode = "trade_plan"
             st.rerun()
 
-    st.markdown("<div style='margin-bottom: 2px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin: 4px 0;'></div>", unsafe_allow_html=True)
 
-    # VIEW 1: TRADINGVIEW CHART
     if st.session_state.view_mode == "chart":
-        tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:535px;width:100%">
+        tv_html = f"""
+        <div class="tradingview-widget-container" style="height:550px;width:100%">
           <div id="tradingview_widget" style="height:100%;width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
           new TradingView.widget(
           {{
-            "autosize": true,
+            "width": "100%",
+            "height": "550",
             "symbol": "{tv_symbol}",
             "interval": "D",
             "timezone": "Asia/Jakarta",
             "theme": "dark",
             "style": "1",
             "locale": "id",
-            "toolbar_bg": "#f1f3f6",
+            "toolbar_bg": "#121E2B",
             "enable_publishing": false,
-            "allow_symbol_change": true,
             "hide_side_toolbar": false,
-            "details": false,
-            "hotlist": false,
+            "allow_symbol_change": false,
+            "watchlist": [
+              "IDX:BBCA",
+              "IDX:BBRI",
+              "IDX:BMRI",
+              "IDX:BBNI",
+              "IDX:ASII",
+              "IDX:TLKM",
+              "IDX:GOTO"
+            ],
+            "details": true,
+            "hotlist": true,
             "calendar": false,
+            "studies": [
+              "MASimple@tv-basicstudies",
+              "Volume@tv-basicstudies"
+            ],
             "container_id": "tradingview_widget"
-          }});
+          }}
+          );
           </script>
         </div>
         """
-        st.components.v1.html(tradingview_html, height=540)
-
-    # VIEW 2: TRADE PLAN
+        components.html(tv_html, height=560)
+        
     elif st.session_state.view_mode == "trade_plan":
-        plan_data = get_stock_trade_plan(active_symbol)
-
-        if plan_data.get("is_ihsg"):
-            st.info("ℹ️ Trade Plan tidak berlaku untuk Indeks IHSG (^JKSE / IDX:COMPOSITE). Pilih salah satu saham untuk melihat kalkulasi eksekusi.")
-        elif "error" in plan_data:
-            st.error(f"⚠️ Gagal menghitung trade plan: {plan_data['error']}")
+        plan = get_stock_trade_plan(active_symbol)
+        if plan.get("is_ihsg"):
+            st.info("Trade Plan otomatis khusus untuk saham individual IDX. IHSG adalah indeks komposit.")
+        elif "error" in plan:
+            st.error(f"Gagal memuat trade plan: {plan['error']}")
         else:
-            is_rejected = plan_data["rule_d_status"] == "REJECTED"
-            card_class = "tp-card-red" if is_rejected else "tp-card-green"
-            status_badge_class = "tp-badge-red" if is_rejected else "tp-badge-green"
-
+            status = plan["rule_d_status"]
+            card_class = "tp-card-green" if status == "PASSED" else "tp-card-red"
+            
             st.markdown(f"""
-                <div class="{card_class}">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-size: 16px; font-weight: bold; color: #E2E8F0;">Strategi Eksekusi: <span style="color: #00E676;">{plan_data['selected_strategy']}</span></span>
-                        <span class="{status_badge_class}">RULE D: {plan_data['rule_d_status']}</span>
-                    </div>
-                    <div style="font-size: 12px; color: #94A3B8;">
-                        <b>Harga Terakhir:</b> {plan_data['close_price']} &nbsp;|&nbsp; 
-                        <b>Catatan Filter:</b> {plan_data['rule_d_reason']} &nbsp;|&nbsp; 
-                        <b>Volume Signal:</b> {plan_data['volume_note']}
-                    </div>
-                </div>
+            <div class="{card_class}">
+                <h4 style="margin:0; color: {'#00E676' if status == 'PASSED' else '#FF5252'};">Rule D Status: {status}</h4>
+                <p style="margin:4px 0 0 0; font-size:13px; color:#94A3B8;">{plan['rule_d_reason']}</p>
+            </div>
             """, unsafe_allow_html=True)
-
-            if is_rejected:
-                st.warning("⚠️ **ALASAN WAIT AND SEE:** Saham ini tidak lolos kriteria proteksi risiko (Rule D). Hindari melakukan entry saat ini.")
+            
+            if status == "PASSED":
+                col_tp1, col_tp2, col_tp3, col_tp4 = st.columns(4)
+                with col_tp1:
+                    st.markdown(f"""
+                    <div class="tp-card">
+                        <span class="tp-badge-blue">STRATEGI</span>
+                        <p style="font-size:14px; font-weight:bold; margin:6px 0 0 0;">{plan['selected_strategy']}</p>
+                        <p style="font-size:11px; color:#94A3B8; margin:2px 0 0 0;">{plan['volume_note']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col_tp2:
+                    st.markdown(f"""
+                    <div class="tp-card">
+                        <span class="tp-badge-green">AREA ENTRY</span>
+                        <p style="font-size:14px; font-weight:bold; margin:6px 0 0 0;">{plan['entry_range']}</p>
+                        <p style="font-size:11px; color:#94A3B8; margin:2px 0 0 0;">Worst: {plan['worst_case_entry']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col_tp3:
+                    st.markdown(f"""
+                    <div class="tp-card">
+                        <span class="tp-badge-red">STOP LOSS</span>
+                        <p style="font-size:14px; font-weight:bold; margin:6px 0 0 0;">{plan['sl_price']}</p>
+                        <p style="font-size:11px; color:#FF5252; margin:2px 0 0 0;">Risiko: {plan['max_risk_pct']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col_tp4:
+                    st.markdown(f"""
+                    <div class="tp-card">
+                        <span class="tp-badge-gold">STATUS RISIKO</span>
+                        <p style="font-size:14px; font-weight:bold; margin:6px 0 0 0;">{plan['max_risk_status']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                st.markdown("<p style='font-size: 13px; font-weight: bold; margin-top: 10px; margin-bottom: 6px;'>Target Profit & Risk/Reward Ratio (R:R)</p>", unsafe_allow_html=True)
+                
+                targets = plan.get("targets", [])
+                if targets:
+                    df_targets = pd.DataFrame(targets)
+                    st.dataframe(df_targets, use_container_width=True, hide_index=True)
             else:
-                m1, m2, m3, m4 = st.columns(4)
-                with m1:
-                    st.metric("Area Entry (Buy Range)", plan_data["entry_range"])
-                with m2:
-                    st.metric("Worst Case Entry", plan_data["worst_case_entry"])
-                with m3:
-                    st.metric("Stop Loss (SL)", plan_data["sl_price"])
-                with m4:
-                    st.metric("Maksimum Risiko", plan_data["max_risk_pct"], delta=plan_data["max_risk_status"])
-
-                st.markdown("<p style='font-size: 14px; font-weight: bold; color: #00E676; margin-top: 15px; margin-bottom: 8px;'>🎯 TARGET TAKE PROFIT & RISK-TO-REWARD</p>", unsafe_allow_html=True)
-
-                if plan_data["targets"]:
-                    df_targets = pd.DataFrame(plan_data["targets"])
-                    df_display = df_targets[[
-                        "target_label", "target_price", "target_basis", 
-                        "potential_gain_pct", "rr_ratio", "rr_status_label", "suitable_trading_style"
-                    ]].copy()
-
-                    df_display.columns = [
-                        "Target", "Harga Target", "Basis Analisis", 
-                        "Potensi Gain", "R:R Ratio", "Status R:R", "Trading Style"
-                    ]
-
-                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+                st.warning("Saham ini tidak memenuhi kriteria Rule D (Proteksi Risiko / Filter Lanjutan). Silakan pilih saham lain atau tunggu konfirmasi harga.")
