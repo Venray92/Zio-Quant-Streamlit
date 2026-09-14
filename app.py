@@ -493,104 +493,188 @@ def run_screener(tickers):
 # 7.trade plan
 
 @st.cache_data(ttl=600)
+# ==========================================
+# MASTER TRADE PLAN ENGINE (BEI SPEC)
+# ==========================================
+def get_tick_size(price):
+    if price < 200: return 1
+    elif price < 500: return 2
+    elif price < 2000: return 5
+    elif price < 5000: return 10
+    else: return 25
+
+def round_to_bei_tick(price):
+    if price <= 0 or pd.isna(price): return 0
+    tick = get_tick_size(price)
+    return float(round(price / tick) * tick)
+
+def add_ticks(price, num_ticks):
+    curr = price
+    for _ in range(abs(num_ticks)):
+        tick = get_tick_size(curr)
+        curr += tick if num_ticks > 0 else -tick
+    return float(curr)
+
+def subtract_ticks(price, num_ticks):
+    return add_ticks(price, -num_ticks)
+
+@st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
-    clean_code = symbol.replace('IDX:', '')
+    clean_code = symbol.replace('IDX:', '').replace('.JK', '').upper()
     if symbol in ["^JKSE", "IDX:COMPOSITE"]:
         return {"is_ihsg": True}
-        
+
     try:
         yf_symbol = f"{clean_code}.JK"
         df = yf.download(yf_symbol, period="90d", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
+        if df.empty or len(df) < 25:
+            return {"is_ihsg": False, "error": "Data historis tidak cukup."}
+
+        df_base = df.iloc[-21:-1] 
         c0 = round_to_bei_tick(float(df['Close'].iloc[-1]))
-        c1 = round_to_bei_tick(float(df['Close'].iloc[-2]))
-        chg_val = c0 - c1
-        chg_pct = (chg_val / c1) * 100
+        o0 = round_to_bei_tick(float(df['Open'].iloc[-1]))
+        h0 = round_to_bei_tick(float(df['High'].iloc[-1]))
+        l0 = round_to_bei_tick(float(df['Low'].iloc[-1]))
+        v0 = float(df['Volume'].iloc[-1])
+        v_ma20 = float(df['Volume'].tail(20).mean())
 
-        # 1. AMBIL SUPPORT TERDEKAT (7-10 HARI TERAKHIR)
-        df_recent = df.tail(10)
-        s1_ekor = round_to_bei_tick(float(df_recent['Low'].min()))
-        s1_body = round_to_bei_tick(float(df_recent[['Open', 'Close']].min().min()))
+        base_wick_high = round_to_bei_tick(float(df_base['High'].max()))
+        base_wick_low = round_to_bei_tick(float(df_base['Low'].min()))
+        base_low_body = round_to_bei_tick(float(df_base[['Open', 'Close']].min().min()))
 
-        # 2. AMBIL RESISTANT TERDEKAT (20 HARI TERAKHIR)
-        df_20 = df.tail(20)
-        r1_ekor = round_to_bei_tick(float(df_20['High'].max()))
-        r1_body = round_to_bei_tick(float(df_20[['Open', 'Close']].max().max()))
+        # EVALUASI RULE D
+        rejected = False
+        rejection_reasons = []
 
-        # 3. PENETAPAN AREA BELI (BOW) & STOP LOSS
-        # Jarak Ekor ke Body di Support Terdekat
-        tick_sz = get_tick_size(s1_body)
-        gap_ticks = int((s1_body - s1_ekor) / tick_sz)
-        
-        if gap_ticks > 5:
-            buy_range_low = subtract_ticks(s1_body, 5)
-            buy_range_high = s1_body
+        if c0 < base_wick_low:
+            rejected = True
+            rejection_reasons.append("Breakdown Support Utama (Close < Wick Low Base)")
+
+        candle_range = h0 - l0
+        body_size = abs(c0 - o0)
+        body_ratio = (body_size / candle_range) if candle_range > 0 else 0
+        close_near_low = (c0 <= (l0 + (candle_range * 0.20)))
+
+        if (c0 < o0) and (body_ratio > 0.80) and close_near_low:
+            rejected = True
+            rejection_reasons.append("Solid Bearish Marubozu (Falling Knife)")
+
+        is_bob = (c0 > base_wick_high)
+        if not is_bob:
+            lower_wick = min(c0, o0) - l0
+            has_lower_rejection = lower_wick > (candle_range * 0.35)
+            is_green_candle = (c0 > o0)
+            if not (has_lower_rejection or is_green_candle):
+                rejected = True
+                rejection_reasons.append("Tidak Ada Rejection di Support (BOW)")
+
+        if rejected:
+            return {
+                "is_ihsg": False,
+                "ticker": clean_code,
+                "close_price": c0,
+                "rule_d_status": "REJECTED",
+                "rule_d_reason": " | ".join(rejection_reasons),
+                "selected_strategy": "WAIT AND SEE",
+                "volume_note": "N/A",
+                "entry_range": "-",
+                "worst_case_entry": 0,
+                "sl_price": 0,
+                "max_risk_pct": "-",
+                "max_risk_status": "INVALID",
+                "targets": []
+            }
+
+        # LOGIKA STRATEGI (BOB / BOW)
+        if is_bob:
+            selected_strategy = "BUY ON BREAKOUT (BOB)"
+            vol_passed = v0 > v_ma20
+            vol_note = "✅ Volume > MA20 (Valid)" if vol_passed else "⚠️ Volume < MA20 (Weak)"
+            entry_low = add_ticks(base_wick_high, 1)
+            entry_high = add_ticks(base_wick_high, 3)
+            worst_case_entry = entry_high
+            sl_price = subtract_ticks(base_wick_high, 3)
+            max_risk_limit = 5.0
         else:
-            buy_range_low = s1_ekor
-            buy_range_high = s1_body
+            selected_strategy = "BUY ON WEAKNESS (BOW)"
+            vol_note = "ℹ️ Pelemahan Volume (Dry Up)"
+            tick_sz = get_tick_size(base_low_body)
+            gap_ticks = int((base_low_body - base_wick_low) / tick_sz)
+            
+            if gap_ticks > 5:
+                entry_low = base_wick_low
+                entry_high = add_ticks(base_wick_low, 5)
+            else:
+                entry_low = base_wick_low
+                entry_high = base_low_body
+                
+            worst_case_entry = entry_high
+            sl_price = subtract_ticks(base_wick_low, 3)
+            max_risk_limit = 8.0
 
-        # SL dipatok 2 tick di bawah Ekor Terdekat (Misal 545 -> 535)
-        sl_price = subtract_ticks(s1_ekor, 2)
+        risk_pts = worst_case_entry - sl_price
+        max_risk_pct = round((risk_pts / worst_case_entry) * 100, 2)
+        risk_status = "✅ RISIKO AMAN" if max_risk_pct <= max_risk_limit else f"⚠️ RISIKO TINGGI (> {max_risk_limit}%)"
 
-        # 4. PENETAPAN TP BERJARAK MINIMAL 10 TICK
-        # TP 1 = High Terdekat (Ekor/Body Max 20H)
-        tp1 = max(r1_body, r1_ekor)
-        tp1_src = "High 20H Terdekat"
-
-        # TP 2 = Minimal TP1 + 10 Tick
-        tp2_candidate = add_ticks(tp1, 10)
+        # TARGET PRICING
+        base_height = base_wick_high - base_wick_low
+        tp1 = round_to_bei_tick(worst_case_entry + base_height)
+        
         df_40 = df.tail(40)
         r2_major = round_to_bei_tick(float(df_40['High'].max()))
-        tp2 = max(tp2_candidate, r2_major)
-        tp2_src = "Resist Major / +10 Tick"
-
-        # TP 3 = Minimal TP2 + 10 Tick
-        tp3 = add_ticks(tp2, 10)
-        tp3_src = "Proyeksi (+10 Tick)"
-
-        plan_type = "BUY ON WEAKNESS (BOW)"
-
-        # Hitung Risk & Reward
-        entry_worst = buy_range_high
-        risk_pct = round(((entry_worst - sl_price) / entry_worst) * 100, 2)
+        tp2 = max(r2_major, add_ticks(tp1, 10))
         
-        reward_pct_1 = round(((tp1 - entry_worst) / entry_worst) * 100, 2)
-        reward_pct_2 = round(((tp2 - entry_worst) / entry_worst) * 100, 2)
-        reward_pct_3 = round(((tp3 - entry_worst) / entry_worst) * 100, 2)
+        tp3 = round_to_bei_tick(worst_case_entry + (base_height * 1.618))
+        tp3 = max(tp3, add_ticks(tp2, 10))
 
-        rr_1 = round(reward_pct_1 / risk_pct, 1) if risk_pct > 0 else 0
-        rr_2 = round(reward_pct_2 / risk_pct, 1) if risk_pct > 0 else 0
-        rr_3 = round(reward_pct_3 / risk_pct, 1) if risk_pct > 0 else 0
+        raw_targets = [
+            ("Target 1 (Fast Swing)", tp1, "Measured Move Base", "Fast Swing"),
+            ("Target 2 (Medium Swing)", tp2, "Major Resistance (40H)", "Medium Swing"),
+            ("Target 3 (Long Swing)", tp3, "Fibo Extension 1.618", "Trend Following")
+        ]
 
-        risk_val = entry_worst - sl_price
-        is_breakdown = c0 < sl_price
+        targets_table = []
+        for label, tp_price, basis, style in raw_targets:
+            reward_pts = tp_price - worst_case_entry
+            gain_pct = round((reward_pts / worst_case_entry) * 100, 2)
+            rr_ratio = round(reward_pts / risk_pts, 2) if risk_pts > 0 else 0
+            
+            if rr_ratio < 2.00: rr_label = "⚠️ TIDAK SESUAI R:R"
+            elif 2.00 <= rr_ratio <= 2.99: rr_label = "✅ LAYAK"
+            else: rr_label = "✅ SANGAT LAYAK"
+
+            targets_table.append({
+                "target_label": label,
+                "target_price": f"Rp {int(tp_price):,}",
+                "target_basis": basis,
+                "potential_gain_pct": f"+{gain_pct}%",
+                "risk_points": f"Rp {int(risk_pts)}",
+                "reward_points": f"Rp {int(reward_pts)}",
+                "rr_ratio": f"1 : {rr_ratio}",
+                "rr_status_label": rr_label,
+                "suitable_trading_style": style
+            })
 
         return {
             "is_ihsg": False,
-            "price": f"Rp {int(c0):,}",
-            "plan_type": plan_type,
-            "is_breakdown": is_breakdown,
-            "buy_range": f"{int(buy_range_low):,} – {int(buy_range_high):,}",
+            "ticker": clean_code,
+            "close_price": f"Rp {int(c0):,}",
+            "rule_d_status": "PASSED",
+            "rule_d_reason": "Lolos Semua Filter Rule D",
+            "selected_strategy": selected_strategy,
+            "volume_note": vol_note,
+            "entry_range": f"Rp {int(entry_low):,} – Rp {int(entry_high):,}",
+            "worst_case_entry": f"Rp {int(worst_case_entry):,}",
             "sl_price": f"Rp {int(sl_price):,}",
-            "tp1": f"Rp {int(tp1):,}",
-            "tp2": f"Rp {int(tp2):,}",
-            "tp3": f"Rp {int(tp3):,}",
-            "tp1_src": tp1_src,
-            "tp2_src": tp2_src,
-            "tp3_src": tp3_src,
-            "risk_pct": f"-{risk_pct}%",
-            "reward_pct_1": f"+{reward_pct_1}%",
-            "reward_pct_2": f"+{reward_pct_2}%",
-            "reward_pct_3": f"+{reward_pct_3}%",
-            "rr_1": rr_1,
-            "rr_2": rr_2,
-            "rr_3": rr_3,
-            "risk_val": f"Rp {int(risk_val):,}"
+            "max_risk_pct": f"-{max_risk_pct}%",
+            "max_risk_status": risk_status,
+            "targets": targets_table
         }
-    except Exception:
-        return {"is_ihsg": False}
+    except Exception as e:
+        return {"is_ihsg": False, "error": str(e)}
 
 # 8. Header Navigation
 col_brand, col_space, col_menu = st.columns([3, 3.7, 2.3])
@@ -765,61 +849,45 @@ with col_right:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # BLOCK 2: PARAMETER HARGAM (SUDAH DISUASIKAN)
-            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 10px; margin-bottom: 8px;'>📊 2. HARGA & PARAMETER TRADE PLAN</p>", unsafe_allow_html=True)
+           # 2. HARGA & PARAMETER TRADE PLAN (BLOCK 2)
+            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>📊 2. HARGA & PARAMETER TRADE PLAN</p>", unsafe_allow_html=True)
             pc1, pc2, pc3 = st.columns(3)
             with pc1:
                 st.markdown(f"""
                     <div class="tp-card-blue">
-                        <p style="color: #00B0FF; font-size: 11px; margin: 0; font-weight: bold;">AREA BELI (ENTRY)</p>
-                        <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['buy_range']}</h3>
-                        <p style="color: #64748B; font-size: 11px; margin: 0;">Harga Terakhir: {tp['price']}</p>
+                        <p style="color: #00B0FF; font-size: 11px; margin: 0; font-weight: bold;">STRATEGI: {tp['selected_strategy']}</p>
+                        <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['entry_range']}</h3>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">Worst Entry: {tp['worst_case_entry']}</p>
                     </div>
                 """, unsafe_allow_html=True)
-            
             with pc2:
                 st.markdown(f"""
                     <div class="tp-card-red">
                         <p style="color: #FF5252; font-size: 11px; margin: 0; font-weight: bold;">STOP LOSS (SL)</p>
                         <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['sl_price']}</h3>
-                        <p style="color: #FF5252; font-size: 11px; margin: 0;">Resiko: {tp['risk_pct']} ({tp['risk_val']})</p>
+                        <p style="color: #FF5252; font-size: 11px; margin: 0;">Max Risk: {tp['max_risk_pct']}</p>
                     </div>
                 """, unsafe_allow_html=True)
-
-            # DIUBAH DARI TARGET 2 MENJADI RISK TO REWARD RATIO (TP1)
             with pc3:
                 st.markdown(f"""
                     <div class="tp-card-green">
-                        <p style="color: #00E676; font-size: 11px; margin: 0; font-weight: bold;">RISK TO REWARD (TP 1)</p>
-                        <h3 style="color: #FFFFFF; margin: 4px 0;">1 : {tp['rr_1']}</h3>
-                        <p style="color: #00E676; font-size: 11px; margin: 0;">Potensi TP1: {tp['reward_pct_1']}</p>
+                        <p style="color: #00E676; font-size: 11px; margin: 0; font-weight: bold;">EVALUASI RISIKO</p>
+                        <h4 style="color: #FFFFFF; margin: 6px 0;">{tp['max_risk_status']}</h4>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">{tp['volume_note']}</p>
                     </div>
                 """, unsafe_allow_html=True)
 
-            # BLOCK 3: TARGET WITH SOURCE (SUDAH DISESUAIKAN)
-            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 10px; margin-bottom: 8px;'>🎯 3. SCALING OUT TARGET (TP1, TP2, TP3)</p>", unsafe_allow_html=True)
+            # 3. SCALING OUT TARGET & R:R (BLOCK 3)
+            st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>🎯 3. SCALING OUT TARGET & RATIO R:R</p>", unsafe_allow_html=True)
             tc1, tc2, tc3 = st.columns(3)
-            with tc1:
-                st.markdown(f"""
-                    <div class="tp-card">
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 1 ({tp['tp1_src']})</p>
-                        <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp1']}</h4>
-                        <span class="tp-badge-green">{tp['reward_pct_1']} (R:R {tp['rr_1']})</span>
-                    </div>
-                """, unsafe_allow_html=True)
-            with tc2:
-                st.markdown(f"""
-                    <div class="tp-card">
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 2 ({tp['tp2_src']})</p>
-                        <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp2']}</h4>
-                        <span class="tp-badge-green">{tp['reward_pct_2']} (R:R {tp['rr_2']})</span>
-                    </div>
-                """, unsafe_allow_html=True)
-            with tc3:
-                st.markdown(f"""
-                    <div class="tp-card">
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 3 ({tp['tp3_src']})</p>
-                        <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp3']}</h4>
-                        <span class="tp-badge-green">{tp['reward_pct_3']} (R:R {tp['rr_3']})</span>
-                    </div>
-                """, unsafe_allow_html=True)
+            cols = [tc1, tc2, tc3]
+            for idx, target in enumerate(tp['targets']):
+                with cols[idx]:
+                    st.markdown(f"""
+                        <div class="tp-card">
+                            <p style="color: #94A3B8; font-size: 11px; margin: 0;">{target['target_label']}</p>
+                            <h3 style="color: #FFFFFF; margin: 2px 0;">{target['target_price']}</h3>
+                            <p style="color: #00E676; font-size: 11px; font-weight: bold; margin: 2px 0;">Potensi: {target['potential_gain_pct']} | R:R {target['rr_ratio']}</p>
+                            <span class="tp-badge-green" style="font-size: 10px;">{target['target_basis']}</span>
+                        </div>
+                    """, unsafe_allow_html=True)
