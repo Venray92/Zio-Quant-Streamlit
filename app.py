@@ -831,23 +831,24 @@ with col_right:
         else:
             # BLOCK 1: STATUS
             st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-bottom: 8px;'>🎯 1. STATUS CHART & EKSEKUSI</p>", unsafe_allow_html=True)
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                st.markdown(f"""
-                    <div class="tp-card">
-                        <p style="color: #64748B; font-size: 11px; margin: 0;">Ticker IDX</p>
-                        <h2 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{clean_ticker}</h2>
-                        <span class="tp-badge-green">● Papan Utama</span>
-                    </div>
-                """, unsafe_allow_html=True)
-            with sc2:
-                st.markdown(f"""
-                    <div class="tp-card-green">
-                        <p style="color: #64748B; font-size: 11px; margin: 0;">Rekomendasi Rencana</p>
-                        <h3 style="color: #FFFFFF; margin: 4px 0; font-weight: 700;">{tp['plan_type']}</h3>
-                        <span class="tp-badge-green">🟢 {tp['plan_type']}</span>
-                    </div>
-                """, unsafe_allow_html=True)
+c1, c2 = st.columns(2)
+with c1:
+    st.markdown(f"""
+        <div class="tp-card">
+            <p style="color: #64748B; font-size: 11px; margin: 0;">Ticker IDX</p>
+            <h2 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{tp['ticker']}</h2>
+            <p style="color: #64748B; font-size: 11px; margin: 0;">Harga Close: <b>{tp['close_price']}</b></p>
+        </div>
+    """, unsafe_allow_html=True)
+with c2:
+    status_color = "#00E676" if tp['rule_d_status'] == "PASSED" else "#FF5252"
+    st.markdown(f"""
+        <div class="tp-card">
+            <p style="color: #64748B; font-size: 11px; margin: 0;">Status Rule D / Validasi</p>
+            <h3 style="color: {status_color}; margin: 4px 0; font-weight: 700;">{tp['rule_d_status']}</h3>
+            <p style="color: #94A3B8; font-size: 11px; margin: 0;">{tp['rule_d_reason']}</p>
+        </div>
+    """, unsafe_allow_html=True)
 
            # 2. HARGA & PARAMETER TRADE PLAN (BLOCK 2)
             st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>📊 2. HARGA & PARAMETER TRADE PLAN</p>", unsafe_allow_html=True)
