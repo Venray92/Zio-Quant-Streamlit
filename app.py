@@ -822,23 +822,7 @@ with col_right:
         """
         st.components.v1.html(tradingview_html, height=540)
 
-  # VIEW 2: TRADE PLAN MODUL
-    elif st.session_state.view_mode == "trade_plan":
-        tp = get_stock_trade_plan(active_symbol)
-        
-        if tp["is_ihsg"]:
-            st.info("ℹ️ Indeks IHSG tidak memiliki Trade Plan individual.")
-        else:
-            # ==========================================
-# UI RENDERING: TRADE PLAN VIEW (FIXED)
-# ==========================================
-tp = get_stock_trade_plan(active_symbol)
-
-if tp.get("is_ihsg"):
-    st.info("ℹ️ Indeks IHSG tidak memiliki Trade Plan individual.")
-elif "error" in tp:
-    st.error(f"⚠️ Gagal memuat data: {tp['error']}")
-else:
+ 
     # --------------------------------------------------
     # BLOCK 1: OVERVIEW & STATUS RULE D
     # --------------------------------------------------
