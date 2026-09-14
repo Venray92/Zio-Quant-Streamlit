@@ -517,7 +517,18 @@ def get_stock_trade_plan(symbol):
         base_wick_low = round_to_bei_tick(float(df_base['Low'].min()))
         base_low_body = round_to_bei_tick(float(df_base[['Open', 'Close']].min().min()))
 
-        # EVALUASI RULE D
+        # ----------------------------------------------------------------------
+        # 1. PERBAIKAN LOGIKA BOB VS BOW BERDASARKAN PROPORSI RENTANG HARGA (> 50%)
+        # ----------------------------------------------------------------------
+        base_range = base_wick_high - base_wick_low
+        price_position_pct = ((c0 - base_wick_low) / base_range) if base_range > 0 else 0.5
+        
+        # Jika posisi harga > 50% dari rentang base ATAU sudah breakout wick high -> BOB
+        is_bob = (price_position_pct >= 0.50) or (c0 >= base_wick_high)
+
+        # ----------------------------------------------------------------------
+        # 2. EVALUASI RULE D (PROTEKSI RISIKO)
+        # ----------------------------------------------------------------------
         rejected = False
         rejection_reasons = []
 
@@ -534,7 +545,6 @@ def get_stock_trade_plan(symbol):
             rejected = True
             rejection_reasons.append("Solid Bearish Marubozu (Falling Knife)")
 
-        is_bob = (c0 > base_wick_high)
         if not is_bob:
             lower_wick = min(c0, o0) - l0
             has_lower_rejection = lower_wick > (candle_range * 0.35)
@@ -543,7 +553,6 @@ def get_stock_trade_plan(symbol):
                 rejected = True
                 rejection_reasons.append("Tidak Ada Rejection di Support (BOW)")
 
-        # JIKA DITOLAK RULE D
         if rejected:
             return {
                 "is_ihsg": False,
@@ -561,16 +570,20 @@ def get_stock_trade_plan(symbol):
                 "targets": []
             }
 
-        # LOGIKA STRATEGI (BOB / BOW)
+        # ----------------------------------------------------------------------
+        # 3. PENETAPAN STRATEGI ENTRY & STOP LOSS
+        # ----------------------------------------------------------------------
         if is_bob:
             selected_strategy = "BUY ON BREAKOUT (BOB)"
             vol_passed = v0 > v_ma20
             vol_note = "✅ Volume > MA20 (Valid)" if vol_passed else "⚠️ Volume < MA20 (Weak)"
-            entry_low = add_ticks(base_wick_high, 1)
-            entry_high = add_ticks(base_wick_high, 3)
+            
+            # Entry pada area konfirmasi breakout High Base
+            entry_low = base_wick_high
+            entry_high = add_ticks(base_wick_high, 2)
             worst_case_entry = entry_high
-            sl_price = subtract_ticks(base_wick_high, 3)
-            max_risk_limit = 5.0
+            sl_price = subtract_ticks(base_wick_low, 2)
+            max_risk_limit = 6.0
         else:
             selected_strategy = "BUY ON WEAKNESS (BOW)"
             vol_note = "ℹ️ Pelemahan Volume (Dry Up)"
@@ -592,21 +605,37 @@ def get_stock_trade_plan(symbol):
         max_risk_pct = round((risk_pts / worst_case_entry) * 100, 2)
         risk_status = "✅ RISIKO AMAN" if max_risk_pct <= max_risk_limit else f"⚠️ RISIKO TINGGI (> {max_risk_limit}%)"
 
-        # TARGET PRICING
-        base_height = base_wick_high - base_wick_low
-        tp1 = round_to_bei_tick(worst_case_entry + base_height)
-        
-        df_40 = df.tail(40)
-        r2_major = round_to_bei_tick(float(df_40['High'].max()))
-        tp2 = max(r2_major, add_ticks(tp1, 10))
-        
-        tp3 = round_to_bei_tick(worst_case_entry + (base_height * 1.618))
-        tp3 = max(tp3, add_ticks(tp2, 10))
+        # ----------------------------------------------------------------------
+        # 4. PERBAIKAN RESISTEN & TARGET PROFIT (MENCARI RESISTEN LOKAL NYATA)
+        # ----------------------------------------------------------------------
+        swing_highs, _ = find_swing_points(df, window=3)
+        # Filter swing high yang berada di atas harga entry terburuk
+        valid_resistances = sorted([r for r in swing_highs if r > worst_case_entry])
+
+        # TP 1: Resisten Terdekat Nyata (Jika tidak ada, fallback ke High 40 hari)
+        if valid_resistances:
+            tp1 = valid_resistances[0]
+        else:
+            tp1 = round_to_bei_tick(float(df.tail(40)['High'].max()))
+
+        # TP 2: Resisten Mayor berikutnya atau Measured Move
+        if len(valid_resistances) > 1:
+            tp2 = valid_resistances[1]
+        else:
+            tp2 = round_to_bei_tick(worst_case_entry + base_range)
+        tp2 = max(tp2, add_ticks(tp1, 5))
+
+        # TP 3: Resisten Atas / Fibonacci Extension
+        if len(valid_resistances) > 2:
+            tp3 = valid_resistances[2]
+        else:
+            tp3 = round_to_bei_tick(worst_case_entry + (base_range * 1.618))
+        tp3 = max(tp3, add_ticks(tp2, 5))
 
         raw_targets = [
-            ("Target 1 (Fast Swing)", tp1, "Measured Move Base", "Fast Swing"),
-            ("Target 2 (Medium Swing)", tp2, "Major Resistance (40H)", "Medium Swing"),
-            ("Target 3 (Long Swing)", tp3, "Fibo Extension 1.618", "Trend Following")
+            ("Target 1 (Fast Swing)", tp1, "Resisten Terdekat (Swing High)", "Fast Swing"),
+            ("Target 2 (Medium Swing)", tp2, "Resisten Mayor", "Medium Swing"),
+            ("Target 3 (Long Swing)", tp3, "Target Ekspansi Base", "Trend Following")
         ]
 
         targets_table = []
