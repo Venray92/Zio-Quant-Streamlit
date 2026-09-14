@@ -167,7 +167,7 @@ if 'watchlist_tab' not in st.session_state:
 if 'screener_choice' not in st.session_state:
     st.session_state.screener_choice = "-- Pilih Screener --"
 
-# Helper Data IHSG (Penambahan Fungsi yang Hilang)
+# Helper Data IHSG
 @st.cache_data(ttl=600)
 def get_ihsg_data():
     try:
@@ -342,20 +342,19 @@ def get_tick_size(price):
     else: return 25
 
 def round_to_bei_tick(price):
+    if price <= 0 or pd.isna(price): return 0
     tick = get_tick_size(price)
     return float(round(price / tick) * tick)
 
 def add_ticks(price, num_ticks):
     curr = float(price)
-    for _ in range(num_ticks):
-        curr += get_tick_size(curr)
+    for _ in range(abs(num_ticks)):
+        tick = get_tick_size(curr)
+        curr += tick if num_ticks > 0 else -tick
     return round_to_bei_tick(curr)
 
 def subtract_ticks(price, num_ticks):
-    curr = float(price)
-    for _ in range(num_ticks):
-        curr -= get_tick_size(curr)
-    return max(1.0, round_to_bei_tick(curr))
+    return add_ticks(price, -num_ticks)
 
 # 5. Helper Deteksi Reversal / Swing Structural
 def find_swing_points(df, window=4):
@@ -490,33 +489,7 @@ def run_screener(tickers):
     if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
-# 7.trade plan
-
-# ==========================================
-# MASTER TRADE PLAN ENGINE (BEI SPEC)
-# ==========================================
-def get_tick_size(price):
-    if price < 200: return 1
-    elif price < 500: return 2
-    elif price < 2000: return 5
-    elif price < 5000: return 10
-    else: return 25
-
-def round_to_bei_tick(price):
-    if price <= 0 or pd.isna(price): return 0
-    tick = get_tick_size(price)
-    return float(round(price / tick) * tick)
-
-def add_ticks(price, num_ticks):
-    curr = price
-    for _ in range(abs(num_ticks)):
-        tick = get_tick_size(curr)
-        curr += tick if num_ticks > 0 else -tick
-    return float(curr)
-
-def subtract_ticks(price, num_ticks):
-    return add_ticks(price, -num_ticks)
-
+# 7. MASTER TRADE PLAN ENGINE (BEI SPEC)
 @st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
     clean_code = symbol.replace('IDX:', '').replace('.JK', '').upper()
@@ -822,77 +795,58 @@ with col_right:
         """
         st.components.v1.html(tradingview_html, height=540)
 
- 
-    # --------------------------------------------------
-    # BLOCK 1: OVERVIEW & STATUS RULE D
-    # --------------------------------------------------
-    st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-bottom: 8px;'>🎯 1. STATUS CHART & EKSEKUSI</p>", unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(f"""
-            <div class="tp-card">
-                <p style="color: #64748B; font-size: 11px; margin: 0;">Ticker IDX</p>
-                <h2 style="color: #FFFFFF; margin: 4px 0; font-weight: 800;">{tp['ticker']}</h2>
-                <p style="color: #64748B; font-size: 11px; margin: 0;">Harga Close: <b>{tp['close_price']}</b></p>
-            </div>
-        """, unsafe_allow_html=True)
-    with c2:
-        status_color = "#00E676" if tp['rule_d_status'] == "PASSED" else "#FF5252"
-        st.markdown(f"""
-            <div class="tp-card">
-                <p style="color: #64748B; font-size: 11px; margin: 0;">Status Rule D / Validasi</p>
-                <h3 style="color: {status_color}; margin: 4px 0; font-weight: 700;">{tp['rule_d_status']}</h3>
-                <p style="color: #94A3B8; font-size: 11px; margin: 0;">{tp['rule_d_reason']}</p>
-            </div>
-        """, unsafe_allow_html=True)
+    # VIEW 2: TRADE PLAN
+    elif st.session_state.view_mode == "trade_plan":
+        plan_data = get_stock_trade_plan(active_symbol)
 
-    # CHECKPOINT: HANYA TAMPILKAN BLOCK 2 & 3 JIKA STATUS PASSED
-    if tp['rule_d_status'] == "REJECTED":
-        st.warning("⚠️ **TRADE PLAN DITOLAK**: Saham ini tidak memenuhi syarat masuk (Breakdown Support / Falling Knife). Disarankan **WAIT AND SEE**.")
-    else:
-        # --------------------------------------------------
-        # BLOCK 2: HARGA & PARAMETER TRADE PLAN
-        # --------------------------------------------------
-        st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>📊 2. HARGA & PARAMETER TRADE PLAN</p>", unsafe_allow_html=True)
-        pc1, pc2, pc3 = st.columns(3)
-        with pc1:
-            st.markdown(f"""
-                <div class="tp-card-blue">
-                    <p style="color: #00B0FF; font-size: 11px; margin: 0; font-weight: bold;">STRATEGI: {tp['selected_strategy']}</p>
-                    <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['entry_range']}</h3>
-                    <p style="color: #94A3B8; font-size: 11px; margin: 0;">Worst Entry: {tp['worst_case_entry']}</p>
-                </div>
-            """, unsafe_allow_html=True)
-        with pc2:
-            st.markdown(f"""
-                <div class="tp-card-red">
-                    <p style="color: #FF5252; font-size: 11px; margin: 0; font-weight: bold;">STOP LOSS (SL)</p>
-                    <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['sl_price']}</h3>
-                    <p style="color: #FF5252; font-size: 11px; margin: 0;">Max Risk: {tp['max_risk_pct']}</p>
-                </div>
-            """, unsafe_allow_html=True)
-        with pc3:
-            st.markdown(f"""
-                <div class="tp-card-green">
-                    <p style="color: #00E676; font-size: 11px; margin: 0; font-weight: bold;">EVALUASI RISIKO</p>
-                    <h4 style="color: #FFFFFF; margin: 6px 0;">{tp['max_risk_status']}</h4>
-                    <p style="color: #94A3B8; font-size: 11px; margin: 0;">{tp['volume_note']}</p>
-                </div>
-            """, unsafe_allow_html=True)
+        if plan_data.get("is_ihsg"):
+            st.info("ℹ️ Trade Plan tidak berlaku untuk Indeks IHSG (^JKSE / IDX:COMPOSITE). Pilih salah satu saham untuk melihat kalkulasi eksekusi.")
+        elif "error" in plan_data:
+            st.error(f"⚠️ Gagal menghitung trade plan: {plan_data['error']}")
+        else:
+            is_rejected = plan_data["rule_d_status"] == "REJECTED"
+            card_class = "tp-card-red" if is_rejected else "tp-card-green"
+            status_badge_class = "tp-badge-red" if is_rejected else "tp-badge-green"
 
-        # --------------------------------------------------
-        # BLOCK 3: SCALING OUT TARGET & RATIO R:R
-        # --------------------------------------------------
-        st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 15px; margin-bottom: 8px;'>🎯 3. SCALING OUT TARGET & RATIO R:R</p>", unsafe_allow_html=True)
-        tc1, tc2, tc3 = st.columns(3)
-        cols = [tc1, tc2, tc3]
-        for idx, target in enumerate(tp['targets']):
-            with cols[idx]:
-                st.markdown(f"""
-                    <div class="tp-card">
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">{target['target_label']}</p>
-                        <h3 style="color: #FFFFFF; margin: 2px 0;">{target['target_price']}</h3>
-                        <p style="color: #00E676; font-size: 11px; font-weight: bold; margin: 2px 0;">Potensi: {target['potential_gain_pct']} | R:R {target['rr_ratio']}</p>
-                        <span class="tp-badge-green" style="font-size: 10px;">{target['target_basis']}</span>
+            st.markdown(f"""
+                <div class="{card_class}">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 16px; font-weight: bold; color: #E2E8F0;">Strategi Eksekusi: <span style="color: #00E676;">{plan_data['selected_strategy']}</span></span>
+                        <span class="{status_badge_class}">RULE D: {plan_data['rule_d_status']}</span>
                     </div>
-                """, unsafe_allow_html=True)
+                    <div style="font-size: 12px; color: #94A3B8;">
+                        <b>Harga Terakhir:</b> {plan_data['close_price']} &nbsp;|&nbsp; 
+                        <b>Catatan Filter:</b> {plan_data['rule_d_reason']} &nbsp;|&nbsp; 
+                        <b>Volume Signal:</b> {plan_data['volume_note']}
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+            if is_rejected:
+                st.warning("⚠️ **ALASAN WAIT AND SEE:** Saham ini tidak lolos kriteria proteksi risiko (Rule D). Hindari melakukan entry saat ini.")
+            else:
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    st.metric("Area Entry (Buy Range)", plan_data["entry_range"])
+                with m2:
+                    st.metric("Worst Case Entry", plan_data["worst_case_entry"])
+                with m3:
+                    st.metric("Stop Loss (SL)", plan_data["sl_price"])
+                with m4:
+                    st.metric("Maksimum Risiko", plan_data["max_risk_pct"], delta=plan_data["max_risk_status"])
+
+                st.markdown("<p style='font-size: 14px; font-weight: bold; color: #00E676; margin-top: 15px; margin-bottom: 8px;'>🎯 TARGET TAKE PROFIT & RISK-TO-REWARD</p>", unsafe_allow_html=True)
+
+                if plan_data["targets"]:
+                    df_targets = pd.DataFrame(plan_data["targets"])
+                    df_display = df_targets[[
+                        "target_label", "target_price", "target_basis", 
+                        "potential_gain_pct", "rr_ratio", "rr_status_label", "suitable_trading_style"
+                    ]].copy()
+
+                    df_display.columns = [
+                        "Target", "Harga Target", "Basis Analisis", 
+                        "Potensi Gain", "R:R Ratio", "Status R:R", "Trading Style"
+                    ]
+
+                    st.dataframe(df_display, use_container_width=True, hide_index=True)
