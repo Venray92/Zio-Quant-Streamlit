@@ -70,20 +70,6 @@ st.markdown("""
         color: #00E676 !important;
     }
 
-    div.stButton > button.brand-btn {
-        background: transparent !important;
-        border: none !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        text-align: left !important;
-        box-shadow: none !important;
-    }
-    div.stButton > button.brand-btn:hover {
-        background: transparent !important;
-        border: none !important;
-        opacity: 0.8;
-    }
-
     /* CUSTOM CARDS UI */
     .tp-card {
         background-color: #111A24;
@@ -102,13 +88,6 @@ st.markdown("""
     .tp-card-red {
         background-color: #261418;
         border: 1px solid #FF5252;
-        border-radius: 10px;
-        padding: 14px;
-        margin-bottom: 10px;
-    }
-    .tp-card-blue {
-        background-color: #101E2E;
-        border: 1px solid #00B0FF;
         border-radius: 10px;
         padding: 14px;
         margin-bottom: 10px;
@@ -182,7 +161,7 @@ def get_ihsg_data():
     except Exception:
         return 7000.0, 0.0
 
-# 3. Database Nama Lengkap Perusahaan IDX
+# 3. Database Nama Perusahaan IDX
 NAMA_PERUSAHAAN = {
     "AALI": "PT Astra Agro Lestari Tbk",
     "ACES": "PT Aspirasi Hidup Indonesia Tbk",
@@ -332,7 +311,7 @@ NAMA_PERUSAHAAN = {
     "WOOD": "PT Integra Indocabinet Tbk"
 }
 
-SAHAM_LIST = sorted(list(set(NAMA_PERUSAHAAN.keys())))
+SAHAM_LIST = sorted(list(setNAMA_PERUSAHAAN.keys()) if False else list(NAMA_PERUSAHAAN.keys()))
 
 # 4. Helper Fraksi Harga BEI
 def get_tick_size(price):
@@ -357,24 +336,20 @@ def add_ticks(price, num_ticks):
 def subtract_ticks(price, num_ticks):
     return add_ticks(price, -num_ticks)
 
-# 5. Helper Deteksi Reversal / Swing Structural
+# 5. Helper Deteksi Swing Structural
 def find_swing_points(df, window=4):
     swing_highs = []
     swing_lows = []
-    
     highs = df['High'].values
     lows = df['Low'].values
     n = len(df)
-    
     for i in range(window, n - window):
         if all(highs[i] > highs[i - j] for j in range(1, window + 1)) and \
            all(highs[i] >= highs[i + j] for j in range(1, window + 1)):
             swing_highs.append(round_to_bei_tick(highs[i]))
-            
         if all(lows[i] < lows[i - j] for j in range(1, window + 1)) and \
            all(lows[i] <= lows[i + j] for j in range(1, window + 1)):
             swing_lows.append(round_to_bei_tick(lows[i]))
-            
     return swing_highs, swing_lows
 
 # 6. Engine Screener
@@ -490,7 +465,7 @@ def run_screener(tickers):
     if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
-# 7. MASTER TRADE PLAN ENGINE (BEI SPEC)
+# 7. CLEAN NEW TRADE PLAN ENGINE (NO OLD LEGACY LOGIC)
 @st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
     clean_code = symbol.replace('IDX:', '').replace('.JK', '').upper()
@@ -513,40 +488,26 @@ def get_stock_trade_plan(symbol):
         v0 = float(df['Volume'].iloc[-1])
         v_ma20 = float(df['Volume'].tail(20).mean())
 
-        df_micro_base = df.tail(10)
-        micro_high = round_to_bei_tick(float(df_micro_base['High'].max()))
-        micro_low = round_to_bei_tick(float(df_micro_base['Low'].min()))
-        micro_body_low = round_to_bei_tick(float(df_micro_base[['Open', 'Close']].min().min()))
+        # Logika murni baru: berbasis struktur harga terkini (10-period base)
+        df_base = df.tail(10)
+        base_high = round_to_bei_tick(float(df_base['High'].max()))
+        base_low = round_to_bei_tick(float(df_base['Low'].min()))
+        base_range = base_high - base_low
 
-        swing_highs, _ = find_swing_points(df, window=2)
-
-        micro_range = micro_high - micro_low
-        price_pos = ((c0 - micro_low) / micro_range) if micro_range > 0 else 0.5
-        is_bob = (price_pos >= 0.50) or (c0 >= micro_high)
-
+        # Filter Validasi Dasar (Rule D bersih)
         rejected = False
         rejection_reasons = []
 
-        if c0 < micro_low:
+        if c0 < base_low:
             rejected = True
-            rejection_reasons.append("Breakdown Support Utama (Close < Wick Low Base)")
+            rejection_reasons.append("Close berada di bawah support struktur base (Breakdown)")
 
         candle_range = h0 - l0
         body_size = abs(c0 - o0)
         body_ratio = (body_size / candle_range) if candle_range > 0 else 0
-        close_near_low = (c0 <= (l0 + (candle_range * 0.20)))
-
-        if (c0 < o0) and (body_ratio > 0.80) and close_near_low:
+        if (c0 < o0) and (body_ratio > 0.80) and (c0 <= l0 + (candle_range * 0.15)):
             rejected = True
-            rejection_reasons.append("Solid Bearish Marubozu (Falling Knife)")
-
-        if not is_bob:
-            lower_wick = min(c0, o0) - l0
-            has_lower_rejection = lower_wick > (candle_range * 0.35)
-            is_green_candle = (c0 > o0)
-            if not (has_lower_rejection or is_green_candle):
-                rejected = True
-                rejection_reasons.append("Tidak Ada Rejection di Support (BOW)")
+            rejection_reasons.append("Pola Bearish Marubozu Signifikan (Tekanan Jual Tinggi)")
 
         if rejected:
             return {
@@ -565,54 +526,51 @@ def get_stock_trade_plan(symbol):
                 "targets": []
             }
 
-        if is_bob:
+        # Penentuan Strategi (BOB vs BOW)
+        price_position = ((c0 - base_low) / base_range) if base_range > 0 else 0.5
+        is_breakout = price_position >= 0.65 or c0 >= base_high
+
+        if is_breakout:
             selected_strategy = "BUY ON BREAKOUT (BOB)"
             vol_passed = v0 > v_ma20
-            vol_note = "✅ Volume > MA20 (Valid)" if vol_passed else "⚠️ Volume < MA20 (Weak)"
+            vol_note = "✅ Volume > MA20 (Konfirmasi Kuat)" if vol_passed else "⚠️ Volume < MA20 (Waspada False Breakout)"
             
-            entry_low = micro_high
-            entry_high = add_ticks(micro_high, 2)
+            entry_low = base_high
+            entry_high = add_ticks(base_high, 2)
             worst_case_entry = entry_high
-            sl_price = subtract_ticks(micro_low, 2)
+            sl_price = subtract_ticks(base_low, 2)
             max_risk_limit = 6.0
         else:
             selected_strategy = "BUY ON WEAKNESS (BOW)"
-            vol_note = "ℹ️ Pelemahan Volume (Dry Up)"
-            tick_sz = get_tick_size(micro_body_low)
-            gap_ticks = int((micro_body_low - micro_low) / tick_sz)
-            
-            if gap_ticks > 5:
-                entry_low = micro_low
-                entry_high = add_ticks(micro_low, 5)
-            else:
-                entry_low = micro_low
-                entry_high = micro_body_low
-                
+            vol_note = "ℹ️ Volume menyusut (Aum / Akumulasi Sehat)"
+            entry_low = base_low
+            entry_high = add_ticks(base_low, 3)
             worst_case_entry = entry_high
-            sl_price = subtract_ticks(micro_low, 3)
-            max_risk_limit = 8.0
+            sl_price = subtract_ticks(base_low, 4)
+            max_risk_limit = 7.5
 
         risk_pts = worst_case_entry - sl_price
         max_risk_pct = round((risk_pts / worst_case_entry) * 100, 2)
         risk_status = "✅ RISIKO AMAN" if max_risk_pct <= max_risk_limit else f"⚠️ RISIKO TINGGI (> {max_risk_limit}%)"
 
-        valid_resists = sorted(list(set([r for r in swing_highs if r > micro_high])))
-
+        # Pencarian Target Profit berdasarkan Swing High berikutnya
+        swing_highs, _ = find_swing_points(df, window=3)
+        valid_resists = sorted(list(set([r for r in swing_highs if r > base_high])))
         if not valid_resists:
-            df_40 = df.tail(40)
-            resists_in_range = df_40[df_40['High'] > micro_high]['High'].values
-            valid_resists = sorted(list(set([round_to_bei_tick(r) for r in resists_in_range])))
+            valid_resists = [
+                round_to_bei_tick(worst_case_entry + base_range),
+                round_to_bei_tick(worst_case_entry + (base_range * 1.5)),
+                round_to_bei_tick(worst_case_entry + (base_range * 2.0))
+            ]
 
-        tp1 = valid_resists[0] if len(valid_resists) > 0 else round_to_bei_tick(worst_case_entry + micro_range)
-        tp2 = valid_resists[1] if len(valid_resists) > 1 else round_to_bei_tick(tp1 + micro_range)
-        tp2 = max(tp2, add_ticks(tp1, 5))
-        tp3 = valid_resists[2] if len(valid_resists) > 2 else round_to_bei_tick(worst_case_entry + (micro_range * 1.618))
-        tp3 = max(tp3, add_ticks(tp2, 5))
+        tp1 = valid_resists[0]
+        tp2 = valid_resists[1] if len(valid_resists) > 1 else round_to_bei_tick(tp1 + (base_range * 0.8))
+        tp3 = valid_resists[2] if len(valid_resists) > 2 else round_to_bei_tick(tp2 + base_range)
 
         raw_targets = [
-            ("Target 1 (Fast Swing)", tp1, "Resisten Terdekat (Horizontal)", "Fast Swing"),
-            ("Target 2 (Medium Swing)", tp2, "Resisten Mayor (Swing High)", "Medium Swing"),
-            ("Target 3 (Long Swing)", tp3, "Target Ekspansi Base", "Trend Following")
+            ("Target 1 (Fast Swing)", tp1, "Resisten Terdekat", "Fast Swing"),
+            ("Target 2 (Medium Swing)", tp2, "Resisten Mayor / Fibonacci Extension", "Medium Swing"),
+            ("Target 3 (Long Swing)", tp3, "Target Ekspansi Maksimal", "Trend Following")
         ]
 
         targets_table = []
@@ -642,7 +600,7 @@ def get_stock_trade_plan(symbol):
             "ticker": clean_code,
             "close_price": f"Rp {int(c0):,}",
             "rule_d_status": "PASSED",
-            "rule_d_reason": "Lolos Semua Filter Rule D",
+            "rule_d_reason": "Lolos Filter Struktur Harga & Proteksi Risiko",
             "selected_strategy": selected_strategy,
             "volume_note": vol_note,
             "entry_range": f"Rp {int(entry_low):,} – Rp {int(entry_high):,}",
