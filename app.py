@@ -69,62 +69,6 @@ st.markdown("""
         border-color: #00E676 !important;
         color: #00E676 !important;
     }
-
-    /* CUSTOM CARDS UI */
-    .tp-card {
-        background-color: #111A24;
-        border: 1px solid #1E2D3D;
-        border-radius: 10px;
-        padding: 14px;
-        margin-bottom: 10px;
-    }
-    .tp-card-green {
-        background-color: #0D201A;
-        border: 1px solid #00E676;
-        border-radius: 10px;
-        padding: 14px;
-        margin-bottom: 10px;
-    }
-    .tp-card-red {
-        background-color: #261418;
-        border: 1px solid #FF5252;
-        border-radius: 10px;
-        padding: 14px;
-        margin-bottom: 10px;
-    }
-    .tp-badge-green {
-        background-color: #00E67622;
-        color: #00E676;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 11px;
-        font-weight: bold;
-    }
-    .tp-badge-red {
-        background-color: #FF525222;
-        color: #FF5252;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 11px;
-        font-weight: bold;
-    }
-    .tp-badge-blue {
-        background-color: #00B0FF22;
-        color: #00B0FF;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 11px;
-        font-weight: bold;
-    }
-    .tp-badge-gold {
-        background-color: #FFD70022;
-        color: #FFD700;
-        padding: 3px 10px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: bold;
-        border: 1px solid #FFD700;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -147,7 +91,6 @@ if 'watchlist_tab' not in st.session_state:
 if 'screener_choice' not in st.session_state:
     st.session_state.screener_choice = "-- Pilih Screener --"
 
-# Helper Data IHSG
 @st.cache_data(ttl=600)
 def get_ihsg_data():
     try:
@@ -311,7 +254,7 @@ NAMA_PERUSAHAAN = {
     "WOOD": "PT Integra Indocabinet Tbk"
 }
 
-SAHAM_LIST = sorted(list(setNAMA_PERUSAHAAN.keys()) if False else list(NAMA_PERUSAHAAN.keys()))
+SAHAM_LIST = sorted(list(NAMA_PERUSAHAAN.keys()))
 
 # 4. Helper Fraksi Harga BEI
 def get_tick_size(price):
@@ -336,23 +279,7 @@ def add_ticks(price, num_ticks):
 def subtract_ticks(price, num_ticks):
     return add_ticks(price, -num_ticks)
 
-# 5. Helper Deteksi Swing Structural
-def find_swing_points(df, window=4):
-    swing_highs = []
-    swing_lows = []
-    highs = df['High'].values
-    lows = df['Low'].values
-    n = len(df)
-    for i in range(window, n - window):
-        if all(highs[i] > highs[i - j] for j in range(1, window + 1)) and \
-           all(highs[i] >= highs[i + j] for j in range(1, window + 1)):
-            swing_highs.append(round_to_bei_tick(highs[i]))
-        if all(lows[i] < lows[i - j] for j in range(1, window + 1)) and \
-           all(lows[i] <= lows[i + j] for j in range(1, window + 1)):
-            swing_lows.append(round_to_bei_tick(lows[i]))
-    return swing_highs, swing_lows
-
-# 6. Engine Screener
+# 5. Engine Screener
 @st.cache_data(ttl=3600)
 def run_screener(tickers):
     results_gc = []
@@ -465,159 +392,183 @@ def run_screener(tickers):
     if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
-# 7. CLEAN NEW TRADE PLAN ENGINE (NO OLD LEGACY LOGIC)
+# 6. Trade Plan Engine Komplet Sesuai Versi Lama (Swing Points, Support/Resistance, Direction, & Trade Plan Table)
 @st.cache_data(ttl=600)
-def get_stock_trade_plan(symbol):
+def get_comprehensive_trade_plan(symbol):
     clean_code = symbol.replace('IDX:', '').replace('.JK', '').upper()
     if symbol in ["^JKSE", "IDX:COMPOSITE"]:
         return {"is_ihsg": True}
 
     try:
         yf_symbol = f"{clean_code}.JK"
-        df = yf.download(yf_symbol, period="90d", interval="1d", progress=False)
+        df = yf.download(yf_symbol, period="180d", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        if df.empty or len(df) < 25:
+        if df.empty or len(df) < 30:
             return {"is_ihsg": False, "error": "Data historis tidak cukup."}
 
-        c0 = round_to_bei_tick(float(df['Close'].iloc[-1]))
+        # Kalkulasi Swing Points
+        window = 4
+        swing_highs_rows = []
+        swing_lows_rows = []
+        highs = df['High'].values
+        lows = df['Low'].values
+        opens = df['Open'].values
+        closes = df['Close'].values
+        dates = df.index
+
+        for i in range(window, len(df) - window):
+            if all(highs[i] > highs[i - j] for j in range(1, window + 1)) and \
+               all(highs[i] >= highs[i + j] for j in range(1, window + 1)):
+                op, hi, lo, cl = opens[i], highs[i], lows[i], closes[i]
+                body_top = max(op, cl)
+                met = f"{body_top}" if body_top == hi else "-"
+                swing_highs_rows.append({
+                    "Date": dates[i],
+                    "Open": round_to_bei_tick(op),
+                    "High": round_to_bei_tick(hi),
+                    "Low": round_to_bei_tick(lo),
+                    "Close": round_to_bei_tick(cl),
+                    "Swing_Type": "Swing High",
+                    "metpoint": met
+                })
+
+            if all(lows[i] < lows[i - j] for j in range(1, window + 1)) and \
+               all(lows[i] <= lows[i + j] for j in range(1, window + 1)):
+                op, hi, lo, cl = opens[i], highs[i], lows[i], closes[i]
+                body_bot = min(op, cl)
+                met = f"{body_bot}" if body_bot == lo else "-"
+                swing_lows_rows.append({
+                    "Date": dates[i],
+                    "Open": round_to_bei_tick(op),
+                    "High": round_to_bei_tick(hi),
+                    "Low": round_to_bei_tick(lo),
+                    "Close": round_to_bei_tick(cl),
+                    "Swing_Type": "Swing Low",
+                    "metpoint": met
+                })
+
+        df_sh = pd.DataFrame(swing_highs_rows).sort_values(by="Date", ascending=False).reset_index(drop=True)
+        df_sl = pd.DataFrame(swing_lows_rows).sort_values(by="Date", ascending=False).reset_index(drop=True)
+        
+        # Gabungkan tabel swing points
+        df_swings = pd.concat([df_sh.head(12), df_sl.head(14)], ignore_index=True)
+        df_swings.insert(0, "No", range(1, len(df_swings) + 1))
+
+        # Strong Resistance & Support
+        res_list = sorted(list(set(df['High'].tail(60))), reverse=True)
+        sup_list = sorted(list(set(df['Low'].tail(60))))
+        
+        strong_res = []
+        if not df_sh.empty:
+            top_sh = df_sh.sort_values(by="High", ascending=False).head(2)
+            ranks = ["1st Highest (Utama)", "2nd Highest (Kedua)"]
+            for idx, row in enumerate(top_sh.itertuples()):
+                strong_res.append({
+                    "Date": row.Date.strftime('%Y-%m-%d') if hasattr(row.Date, 'strftime') else str(row.Date)[:10],
+                    "Rank": ranks[idx],
+                    "Body_Top": max(row.Open, row.Close),
+                    "High": row.High
+                })
+        df_strong_res = pd.DataFrame(strong_res)
+
+        strong_sup = []
+        if not df_sl.empty:
+            bot_sl = df_sl.sort_values(by="Low", ascending=True).head(2)
+            ranks_sup = ["1st Support (Terdekat)", "2nd Support"]
+            for idx, row in enumerate(bot_sl.itertuples()):
+                strong_sup.append({
+                    "Date": row.Date.strftime('%Y-%m-%d') if hasattr(row.Date, 'strftime') else str(row.Date)[:10],
+                    "Rank": ranks_sup[idx],
+                    "Low": row.Low,
+                    "Body_Bottom": min(row.Open, row.Close)
+                })
+        df_strong_sup = pd.DataFrame(strong_sup)
+
+        # Direction Table
+        sh_update = float(df_sh['High'].iloc[0]) if not df_sh.empty else float(df['High'].max())
+        sl_update = float(df_sl['Low'].iloc[0]) if not df_sl.empty else float(df['Low'].min())
+        level_50 = round_to_bei_tick((sh_update + sl_update) / 2)
+        last_close = round_to_bei_tick(float(df['Close'].iloc[-1]))
+        mkt_dir = "BOW" if last_close < level_50 else "BOB"
+
+        df_direction = pd.DataFrame([{
+            "Swing High Terupdate": sh_update,
+            "Swing Low Terupdate": sl_update,
+            "Level 50%": level_50,
+            "Last Close": last_close,
+            "Market Direction": mkt_dir
+        }])
+
+        # Trade Plan Table
+        c0 = last_close
         o0 = round_to_bei_tick(float(df['Open'].iloc[-1]))
-        h0 = round_to_bei_tick(float(df['High'].iloc[-1]))
-        l0 = round_to_bei_tick(float(df['Low'].iloc[-1]))
-        v0 = float(df['Volume'].iloc[-1])
-        v_ma20 = float(df['Volume'].tail(20).mean())
-
-        # Logika murni baru: berbasis struktur harga terkini (10-period base)
-        df_base = df.tail(10)
-        base_high = round_to_bei_tick(float(df_base['High'].max()))
-        base_low = round_to_bei_tick(float(df_base['Low'].min()))
-        base_range = base_high - base_low
-
-        # Filter Validasi Dasar (Rule D bersih)
-        rejected = False
-        rejection_reasons = []
-
-        if c0 < base_low:
-            rejected = True
-            rejection_reasons.append("Close berada di bawah support struktur base (Breakdown)")
-
-        candle_range = h0 - l0
-        body_size = abs(c0 - o0)
-        body_ratio = (body_size / candle_range) if candle_range > 0 else 0
-        if (c0 < o0) and (body_ratio > 0.80) and (c0 <= l0 + (candle_range * 0.15)):
-            rejected = True
-            rejection_reasons.append("Pola Bearish Marubozu Signifikan (Tekanan Jual Tinggi)")
-
-        if rejected:
-            return {
-                "is_ihsg": False,
-                "ticker": clean_code,
-                "close_price": f"Rp {int(c0):,}",
-                "rule_d_status": "REJECTED",
-                "rule_d_reason": " | ".join(rejection_reasons),
-                "selected_strategy": "WAIT AND SEE",
-                "volume_note": "N/A",
-                "entry_range": "-",
-                "worst_case_entry": "-",
-                "sl_price": "-",
-                "max_risk_pct": "-",
-                "max_risk_status": "INVALID",
-                "targets": []
-            }
-
-        # Penentuan Strategi (BOB vs BOW)
-        price_position = ((c0 - base_low) / base_range) if base_range > 0 else 0.5
-        is_breakout = price_position >= 0.65 or c0 >= base_high
-
-        if is_breakout:
-            selected_strategy = "BUY ON BREAKOUT (BOB)"
-            vol_passed = v0 > v_ma20
-            vol_note = "✅ Volume > MA20 (Konfirmasi Kuat)" if vol_passed else "⚠️ Volume < MA20 (Waspada False Breakout)"
-            
-            entry_low = base_high
-            entry_high = add_ticks(base_high, 2)
-            worst_case_entry = entry_high
-            sl_price = subtract_ticks(base_low, 2)
-            max_risk_limit = 6.0
+        
+        # Status Candle & Warning sederhana berbasis price action
+        if c0 > o0:
+            status_candle = "Bullish Engulfing"
+            warning_msg = "💡 Sinyal: Pembeli mengambil alih. Sinyal pembalikan arah naik cukup valid."
         else:
-            selected_strategy = "BUY ON WEAKNESS (BOW)"
-            vol_note = "ℹ️ Volume menyusut (Aum / Akumulasi Sehat)"
-            entry_low = base_low
-            entry_high = add_ticks(base_low, 3)
-            worst_case_entry = entry_high
-            sl_price = subtract_ticks(base_low, 4)
-            max_risk_limit = 7.5
+            status_candle = "Bearish Candle"
+            warning_msg = "⚠️ Sinyal: Tekanan jual masih mendominasi, perhatikan area support terdekat."
 
-        risk_pts = worst_case_entry - sl_price
-        max_risk_pct = round((risk_pts / worst_case_entry) * 100, 2)
-        risk_status = "✅ RISIKO AMAN" if max_risk_pct <= max_risk_limit else f"⚠️ RISIKO TINGGI (> {max_risk_limit}%)"
+        tp1_val = float(df_strong_res['High'].iloc[0]) if not df_strong_res.empty else round_to_bei_tick(c0 * 1.1)
+        tp2_val = float(df_strong_res['High'].iloc[1]) if len(df_strong_res) > 1 else round_to_bei_tick(tp1_val * 1.05)
 
-        # Pencarian Target Profit berdasarkan Swing High berikutnya
-        swing_highs, _ = find_swing_points(df, window=3)
-        valid_resists = sorted(list(set([r for r in swing_highs if r > base_high])))
-        if not valid_resists:
-            valid_resists = [
-                round_to_bei_tick(worst_case_entry + base_range),
-                round_to_bei_tick(worst_case_entry + (base_range * 1.5)),
-                round_to_bei_tick(worst_case_entry + (base_range * 2.0))
-            ]
+        bow_buy_low = sl_update
+        bow_buy_high = round_to_bei_tick(sl_update + ((sh_update - sl_update) * 0.15))
+        bow_sl = subtract_ticks(bow_buy_low, 3)
+        bow_rr = round((tp1_val - bow_buy_high) / (bow_buy_high - bow_sl), 1) if (bow_buy_high - bow_sl) > 0 else 5.0
 
-        tp1 = valid_resists[0]
-        tp2 = valid_resists[1] if len(valid_resists) > 1 else round_to_bei_tick(tp1 + (base_range * 0.8))
-        tp3 = valid_resists[2] if len(valid_resists) > 2 else round_to_bei_tick(tp2 + base_range)
+        bob_buy_low = sh_update
+        bob_buy_high = add_ticks(sh_update, 3)
+        bob_sl = subtract_ticks(sh_update, 3)
+        bob_rr = round((tp2_val - bob_buy_high) / (bob_buy_high - bob_sl), 1) if (bob_buy_high - bob_sl) > 0 else 5.0
 
-        raw_targets = [
-            ("Target 1 (Fast Swing)", tp1, "Resisten Terdekat", "Fast Swing"),
-            ("Target 2 (Medium Swing)", tp2, "Resisten Mayor / Fibonacci Extension", "Medium Swing"),
-            ("Target 3 (Long Swing)", tp3, "Target Ekspansi Maksimal", "Trend Following")
+        trade_plans = [
+            {
+                "No": 1,
+                "Type": "BOW",
+                "Range Buy": f"{int(bow_buy_low)} - {int(bow_buy_high)}",
+                "Stop Loss": int(bow_sl),
+                "Target 1": int(tp1_val),
+                "Target 2": int(tp2_val),
+                "Rasio (R:R)": f"1 : {bow_rr}",
+                "Status Candle": status_candle,
+                "Warning": warning_msg
+            },
+            {
+                "No": 2,
+                "Type": "BOB",
+                "Range Buy": f"{int(bob_buy_low)} - {int(bob_buy_high)}",
+                "Stop Loss": int(bob_sl),
+                "Target 1": int(tp1_val),
+                "Target 2": int(tp2_val),
+                "Rasio (R:R)": f"1 : {bob_rr}",
+                "Status Candle": status_candle,
+                "Warning": warning_msg
+            }
         ]
-
-        targets_table = []
-        for label, tp_price, basis, style in raw_targets:
-            reward_pts = tp_price - worst_case_entry
-            gain_pct = round((reward_pts / worst_case_entry) * 100, 2)
-            rr_ratio = round(reward_pts / risk_pts, 2) if risk_pts > 0 else 0
-            
-            if rr_ratio < 2.00: rr_label = "⚠️ TIDAK SESUAI R:R"
-            elif 2.00 <= rr_ratio <= 2.99: rr_label = "✅ LAYAK"
-            else: rr_label = "✅ SANGAT LAYAK"
-
-            targets_table.append({
-                "target_label": label,
-                "target_price": f"Rp {int(tp_price):,}",
-                "target_basis": basis,
-                "potential_gain_pct": f"+{gain_pct}%",
-                "risk_points": f"Rp {int(risk_pts)}",
-                "reward_points": f"Rp {int(reward_pts)}",
-                "rr_ratio": f"1 : {rr_ratio}",
-                "rr_status_label": rr_label,
-                "suitable_trading_style": style
-            })
+        df_trade_plans = pd.DataFrame(trade_plans)
 
         return {
             "is_ihsg": False,
             "ticker": clean_code,
-            "close_price": f"Rp {int(c0):,}",
-            "rule_d_status": "PASSED",
-            "rule_d_reason": "Lolos Filter Struktur Harga & Proteksi Risiko",
-            "selected_strategy": selected_strategy,
-            "volume_note": vol_note,
-            "entry_range": f"Rp {int(entry_low):,} – Rp {int(entry_high):,}",
-            "worst_case_entry": f"Rp {int(worst_case_entry):,}",
-            "sl_price": f"Rp {int(sl_price):,}",
-            "max_risk_pct": f"-{max_risk_pct}%",
-            "max_risk_status": risk_status,
-            "targets": targets_table
+            "df_swings": df_swings,
+            "df_strong_res": df_strong_res,
+            "df_strong_sup": df_strong_sup,
+            "df_direction": df_direction,
+            "df_trade_plans": df_trade_plans
         }
     except Exception as e:
         return {"is_ihsg": False, "error": str(e)}
 
-# 8. Header Navigation
+# 7. Header Navigation
 col_brand, col_space, col_menu = st.columns([3, 3.7, 2.3])
 
 with col_brand:
-    if st.button("📈 Zio - Quant", key="home_btn", help="Reset ke Home / Default View"):
+    if st.button("📈 Zio - Quant", key="home_btn"):
         reset_to_default()
         st.rerun()
 
@@ -631,10 +582,9 @@ with col_menu:
 
 st.markdown("<hr style='margin-top: 2px; margin-bottom: 6px; border-color: #1E2D3D;'>", unsafe_allow_html=True)
 
-# 9. Layout Utama (2 Kolom)
+# 8. Layout Utama (2 Kolom)
 col_left, col_right = st.columns([1, 2.2], gap="medium")
 
-# --- KIRI: MARKET INDEX & LIST SAHAM ---
 with col_left:
     st.markdown("<p style='font-size: 11px; color: #64748B; margin-bottom: 4px; font-weight: 600; letter-spacing: 0.5px;'>MARKET INDEX & WATCHLIST</p>", unsafe_allow_html=True)
     
@@ -702,7 +652,7 @@ with col_left:
     else:
         st.info("Silakan pilih strategi screener pada dropdown kanan atas untuk menampilkan daftar rekomendasi saham.")
 
-# --- KANAN: CHART / TRADE PLAN ---
+# 9. Kolom Kanan: Chart / Trade Plan Komplet
 with col_right:
     active_symbol = st.session_state.active_ticker
     clean_ticker = "IHSG" if active_symbol in ["^JKSE", "IDX:COMPOSITE"] else active_symbol.replace("IDX:", "")
@@ -774,61 +724,25 @@ with col_right:
         components.html(tv_html, height=560)
         
     elif st.session_state.view_mode == "trade_plan":
-        plan = get_stock_trade_plan(active_symbol)
+        plan = get_comprehensive_trade_plan(active_symbol)
         if plan.get("is_ihsg"):
             st.info("Trade Plan otomatis khusus untuk saham individual IDX. IHSG adalah indeks komposit.")
         elif "error" in plan:
             st.error(f"Gagal memuat trade plan: {plan['error']}")
         else:
-            status = plan["rule_d_status"]
-            card_class = "tp-card-green" if status == "PASSED" else "tp-card-red"
-            
-            st.markdown(f"""
-            <div class="{card_class}">
-                <h4 style="margin:0; color: {'#00E676' if status == 'PASSED' else '#FF5252'};">Rule D Status: {status}</h4>
-                <p style="margin:4px 0 0 0; font-size:13px; color:#94A3B8;">{plan['rule_d_reason']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if status == "PASSED":
-                col_tp1, col_tp2, col_tp3, col_tp4 = st.columns(4)
-                with col_tp1:
-                    st.markdown(f"""
-                    <div class="tp-card">
-                        <span class="tp-badge-blue">STRATEGI</span>
-                        <p style="font-size:14px; font-weight:bold; margin:6px 0 0 0;">{plan['selected_strategy']}</p>
-                        <p style="font-size:11px; color:#94A3B8; margin:2px 0 0 0;">{plan['volume_note']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                with col_tp2:
-                    st.markdown(f"""
-                    <div class="tp-card">
-                        <span class="tp-badge-green">AREA ENTRY</span>
-                        <p style="font-size:14px; font-weight:bold; margin:6px 0 0 0;">{plan['entry_range']}</p>
-                        <p style="font-size:11px; color:#94A3B8; margin:2px 0 0 0;">Worst: {plan['worst_case_entry']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                with col_tp3:
-                    st.markdown(f"""
-                    <div class="tp-card">
-                        <span class="tp-badge-red">STOP LOSS</span>
-                        <p style="font-size:14px; font-weight:bold; margin:6px 0 0 0;">{plan['sl_price']}</p>
-                        <p style="font-size:11px; color:#FF5252; margin:2px 0 0 0;">Risiko: {plan['max_risk_pct']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                with col_tp4:
-                    st.markdown(f"""
-                    <div class="tp-card">
-                        <span class="tp-badge-gold">STATUS RISIKO</span>
-                        <p style="font-size:14px; font-weight:bold; margin:6px 0 0 0;">{plan['max_risk_status']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                st.markdown("<p style='font-size: 13px; font-weight: bold; margin-top: 10px; margin-bottom: 6px;'>Target Profit & Risk/Reward Ratio (R:R)</p>", unsafe_allow_html=True)
-                
-                targets = plan.get("targets", [])
-                if targets:
-                    df_targets = pd.DataFrame(targets)
-                    st.dataframe(df_targets, use_container_width=True, hide_index=True)
-            else:
-                st.warning("Saham ini tidak memenuhi kriteria Rule D (Proteksi Risiko / Filter Lanjutan). Silakan pilih saham lain atau tunggu konfirmasi harga.")
+            st.markdown(f"### === TABEL SWING POINTS ===")
+            st.dataframe(plan["df_swings"], use_container_width=True, hide_index=True)
+
+            col_res, col_sup = st.columns(2)
+            with col_res:
+                st.markdown(f"### === STRONG RESISTANCE ===")
+                st.dataframe(plan["df_strong_res"], use_container_width=True, hide_index=True)
+            with col_sup:
+                st.markdown(f"### === STRONG SUPPORT ===")
+                st.dataframe(plan["df_strong_sup"], use_container_width=True, hide_index=True)
+
+            st.markdown(f"### === TABEL DIRECTION ===")
+            st.dataframe(plan["df_direction"], use_container_width=True, hide_index=True)
+
+            st.markdown(f"### === TABEL TRADE PLAN ===")
+            st.dataframe(plan["df_trade_plans"], use_container_width=True, hide_index=True)
