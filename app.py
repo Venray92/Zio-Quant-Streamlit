@@ -392,7 +392,7 @@ def run_screener(tickers):
     if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
-# 6. Trade Plan Engine Komplet Sesuai Versi Lama (Swing Points, Support/Resistance, Direction, & Trade Plan Table)
+# 6. Trade Plan Engine Komplet Sesuai Versi Lama dengan Sorting & Periode yang Akurat
 @st.cache_data(ttl=600)
 def get_comprehensive_trade_plan(symbol):
     clean_code = symbol.replace('IDX:', '').replace('.JK', '').upper()
@@ -449,20 +449,23 @@ def get_comprehensive_trade_plan(symbol):
                     "metpoint": met
                 })
 
-        df_sh = pd.DataFrame(swing_highs_rows).sort_values(by="Date", ascending=False).reset_index(drop=True)
-        df_sl = pd.DataFrame(swing_lows_rows).sort_values(by="Date", ascending=False).reset_index(drop=True)
+        df_sh = pd.DataFrame(swing_highs_rows)
+        df_sl = pd.DataFrame(swing_lows_rows)
+
+        # Pastikan ter-sort descending (terbaru di atas)
+        if not df_sh.empty:
+            df_sh = df_sh.sort_values(by="Date", ascending=False).reset_index(drop=True)
+        if not df_sl.empty:
+            df_sl = df_sl.sort_values(by="Date", ascending=False).reset_index(drop=True)
         
         # Gabungkan tabel swing points
-        df_swings = pd.concat([df_sh.head(12), df_sl.head(14)], ignore_index=True)
+        df_swings = pd.concat([df_sh.head(15), df_sl.head(15)], ignore_index=True)
         df_swings.insert(0, "No", range(1, len(df_swings) + 1))
 
-        # Strong Resistance & Support
-        res_list = sorted(list(set(df['High'].tail(60))), reverse=True)
-        sup_list = sorted(list(set(df['Low'].tail(60))))
-        
+        # Strong Resistance (ambil 2 Swing High terbaru)
         strong_res = []
         if not df_sh.empty:
-            top_sh = df_sh.sort_values(by="High", ascending=False).head(2)
+            top_sh = df_sh.head(2)
             ranks = ["1st Highest (Utama)", "2nd Highest (Kedua)"]
             for idx, row in enumerate(top_sh.itertuples()):
                 strong_res.append({
@@ -473,9 +476,10 @@ def get_comprehensive_trade_plan(symbol):
                 })
         df_strong_res = pd.DataFrame(strong_res)
 
+        # Strong Support (ambil 2 Swing Low terbaru)
         strong_sup = []
         if not df_sl.empty:
-            bot_sl = df_sl.sort_values(by="Low", ascending=True).head(2)
+            bot_sl = df_sl.head(2)
             ranks_sup = ["1st Support (Terdekat)", "2nd Support"]
             for idx, row in enumerate(bot_sl.itertuples()):
                 strong_sup.append({
@@ -505,7 +509,7 @@ def get_comprehensive_trade_plan(symbol):
         c0 = last_close
         o0 = round_to_bei_tick(float(df['Open'].iloc[-1]))
         
-        # Status Candle & Warning sederhana berbasis price action
+        # Status Candle & Warning
         if c0 > o0:
             status_candle = "Bullish Engulfing"
             warning_msg = "💡 Sinyal: Pembeli mengambil alih. Sinyal pembalikan arah naik cukup valid."
