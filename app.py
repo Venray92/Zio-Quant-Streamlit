@@ -490,7 +490,6 @@ def run_screener(tickers):
     if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
-# 7. Trade Plan Engine
 @st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
     clean_code = symbol.replace('IDX:', '')
@@ -499,72 +498,72 @@ def get_stock_trade_plan(symbol):
             "is_ihsg": True, "price": "-", "plan_type": "-", "is_breakdown": False,
             "buy_range": "-", "sl_price": "-", "tp1": "-", "tp2": "-", "tp3": "-",
             "risk_pct": "-", "reward_pct_1": "-", "reward_pct_2": "-", "reward_pct_3": "-",
-            "rr_1": 0, "rr_2": 0, "rr_3": 0, "max_allowed_risk": 0,
-            "vol_spike": False, "entry_worst": 0, "technical_score": 50
+            "rr_1": 0, "rr_2": 0, "rr_3": 0, "risk_val": "-", "reward_val_2": "-"
         }
     try:
         yf_symbol = f"{clean_code}.JK"
-        df = yf.download(yf_symbol, period="180d", interval="1d", progress=False)
+        df = yf.download(yf_symbol, period="90d", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
         c0 = round_to_bei_tick(float(df['Close'].iloc[-1]))
-        o0 = round_to_bei_tick(float(df['Open'].iloc[-1]))
-        h0 = round_to_bei_tick(float(df['High'].iloc[-1]))
-        l0 = round_to_bei_tick(float(df['Low'].iloc[-1]))
-        v0 = float(df['Volume'].iloc[-1])
         c1 = round_to_bei_tick(float(df['Close'].iloc[-2]))
         chg_val = c0 - c1
         chg_pct = (chg_val / c1) * 100
 
-        df_recent = df.tail(60)
-        sh_list, sl_list = find_swing_points(df_recent, window=3)
+        # 1. AMBIL DATA 20 HARI TERAKHIR (GELOMBANG 1)
+        df_20 = df.tail(20)
         
-        valid_sh = sorted(list(set([round_to_bei_tick(x) for x in sh_list])))
-        valid_sl = sorted(list(set([round_to_bei_tick(x) for x in sl_list])))
-        swing_low_real = valid_sl[-1] if len(valid_sl) > 0 else round_to_bei_tick(df['Low'].tail(20).min())
+        # High & Body Max (Resist 1)
+        r1_ekor = round_to_bei_tick(float(df_20['High'].max()))
+        r1_body = round_to_bei_tick(float(df_20[['Open', 'Close']].max().max()))
+        
+        # Low & Body Min (Support 1)
+        s1_ekor = round_to_bei_tick(float(df_20['Low'].min()))
+        s1_body = round_to_bei_tick(float(df_20[['Open', 'Close']].min().min()))
 
-        base_high = round_to_bei_tick(df['High'].tail(20).max())
-        if clean_code == "ISAT":
-            base_high = 2490.0
+        # 2. AMBIL DATA 21-40 HARI LALU (GELOMBANG 2 / MUNDUR LAGI)
+        df_prev_20 = df.iloc[-40:-20] if len(df) >= 40 else df_20
+        r2_ekor = round_to_bei_tick(float(df_prev_20['High'].max()))
+        r2_body = round_to_bei_tick(float(df_prev_20[['Open', 'Close']].max().max()))
+        s2_ekor = round_to_bei_tick(float(df_prev_20['Low'].min()))
+        s2_body = round_to_bei_tick(float(df_prev_20[['Open', 'Close']].min().min()))
 
-        if c0 >= (base_high * 0.95):
+        # Jika R2 ternyata lebih rendah dari R1, naikkan R2 ke atas R1 pakai proyeksi tick
+        if r2_ekor <= r1_ekor:
+            r2_ekor = add_ticks(r1_ekor, 8)
+            r2_body = add_ticks(r1_body, 6)
+
+        # 3. KONDISI EKSEKUSI STRATEGI
+        # Jarak Support 1 Ekor & Body
+        s1_min = min(s1_ekor, s1_body)
+        s1_max = max(s1_ekor, s1_body)
+        
+        # Jarak Resist 1 Ekor & Body
+        r1_min = min(r1_ekor, r1_body)
+        r1_max = max(r1_ekor, r1_body)
+
+        # Tentukan Strategi berdasarkan Posisi Harga Terakhir (c0)
+        if c0 >= (r1_max * 0.98): # Mendekati atau Tembus Resist 1
             plan_type = "BUY ON BREAKOUT (BOB)"
-            breakout_point = base_high
+            buy_range_low = r1_min
+            buy_range_high = r1_max
+            sl_price = subtract_ticks(s1_max, 2)
             
-            buy_range_low = breakout_point
-            buy_range_high = add_ticks(breakout_point, 3)
-            sl_price = subtract_ticks(breakout_point, 3)
-            
-            risk_point = buy_range_high - sl_price
-            tp1 = add_ticks(buy_range_high, int((risk_point * 2) / get_tick_size(buy_range_high)))
-            tp2_candidates = [x for x in valid_sh if x > tp1]
-            tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
-            tp3_candidates = [x for x in valid_sh if x > tp2]
-            tp3 = tp3_candidates[0] if len(tp3_candidates) > 0 else add_ticks(tp2, 10)
-        else:
+            tp1 = r2_body
+            tp2 = r2_ekor
+            tp3 = add_ticks(r2_ekor, 6)
+        else: # Lebih dekat ke Support / Retracement
             plan_type = "BUY ON WEAKNESS (BOW)"
+            buy_range_low = s1_min
+            buy_range_high = s1_max
+            sl_price = subtract_ticks(s1_min, 2)
             
-            buy_range_low = subtract_ticks(swing_low_real, 2)
-            buy_range_high = add_ticks(swing_low_real, 2)
-            sl_price = subtract_ticks(buy_range_low, 3)
-            
-            tp1 = base_high
-            tp2_candidates = [x for x in valid_sh if x > tp1]
-            tp2 = tp2_candidates[0] if len(tp2_candidates) > 0 else add_ticks(tp1, 10)
-            tp3 = add_ticks(tp2, 10)
+            tp1 = r1_min
+            tp2 = r1_max
+            tp3 = r2_ekor
 
-        buy_range_low = round_to_bei_tick(buy_range_low)
-        buy_range_high = round_to_bei_tick(buy_range_high)
-        sl_price = round_to_bei_tick(sl_price)
-        tp1 = round_to_bei_tick(tp1)
-        tp2 = round_to_bei_tick(tp2)
-        tp3 = round_to_bei_tick(tp3)
-
-        is_marubozu_red = (c0 < o0) and ((o0 - c0) / (h0 - l0 + 1e-5) > 0.85)
-        is_new_low = c0 <= (swing_low_real * 0.97)
-        is_breakdown = is_marubozu_red or is_new_low
-
+        # 4. HITUNG RISK & REWARD
         entry_worst = buy_range_high
         risk_pct = round(((entry_worst - sl_price) / entry_worst) * 100, 2)
         
@@ -576,9 +575,9 @@ def get_stock_trade_plan(symbol):
         rr_2 = round(reward_pct_2 / risk_pct, 1) if risk_pct > 0 else 0
         rr_3 = round(reward_pct_3 / risk_pct, 1) if risk_pct > 0 else 0
 
-        vol_ma20 = float(df['Volume'].tail(20).mean())
         risk_val = entry_worst - sl_price
         reward_val_2 = tp2 - entry_worst
+        is_breakdown = c0 < sl_price
 
         return {
             "is_ihsg": False,
@@ -593,12 +592,6 @@ def get_stock_trade_plan(symbol):
             "tp1": f"Rp {int(tp1):,}",
             "tp2": f"Rp {int(tp2):,}",
             "tp3": f"Rp {int(tp3):,}",
-            "raw_sl": int(sl_price),
-            "raw_entry_low": int(buy_range_low),
-            "raw_entry_high": int(buy_range_high),
-            "raw_tp1": int(tp1),
-            "raw_tp2": int(tp2),
-            "raw_tp3": int(tp3),
             "risk_pct": f"-{risk_pct}%",
             "reward_pct_1": f"+{reward_pct_1}%",
             "reward_pct_2": f"+{reward_pct_2}%",
@@ -608,7 +601,6 @@ def get_stock_trade_plan(symbol):
             "rr_3": rr_3,
             "risk_val": f"Rp {int(risk_val):,}",
             "reward_val_2": f"Rp {int(reward_val_2):,}",
-            "vol_spike": (v0 >= vol_ma20),
             "entry_worst": entry_worst
         }
     except Exception as e:
@@ -616,10 +608,7 @@ def get_stock_trade_plan(symbol):
             "is_ihsg": False, "price": "-", "plan_type": "-", "is_breakdown": False,
             "buy_range": "-", "sl_price": "-", "tp1": "-", "tp2": "-", "tp3": "-",
             "risk_pct": "-", "reward_pct_1": "-", "reward_pct_2": "-", "reward_pct_3": "-",
-            "rr_1": 0, "rr_2": 0, "rr_3": 0, "vol_spike": False, "entry_worst": 0,
-            "raw_c0": 0, "chg_val": 0, "chg_pct": 0, "raw_sl": 0, "raw_entry_low": 0, 
-            "raw_entry_high": 0, "raw_tp1": 0, "raw_tp2": 0, "raw_tp3": 0,
-            "risk_val": "-", "reward_val_2": "-"
+            "rr_1": 0, "rr_2": 0, "rr_3": 0, "risk_val": "-", "reward_val_2": "-"
         }
 
 # 8. Header Navigation
