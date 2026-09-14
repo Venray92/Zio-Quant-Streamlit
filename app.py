@@ -492,7 +492,6 @@ def run_screener(tickers):
 
 # 7.trade plan
 
-@st.cache_data(ttl=600)
 # ==========================================
 # MASTER TRADE PLAN ENGINE (BEI SPEC)
 # ==========================================
@@ -571,18 +570,19 @@ def get_stock_trade_plan(symbol):
                 rejected = True
                 rejection_reasons.append("Tidak Ada Rejection di Support (BOW)")
 
+        # JIKA DITOLAK RULE D
         if rejected:
             return {
                 "is_ihsg": False,
                 "ticker": clean_code,
-                "close_price": c0,
+                "close_price": f"Rp {int(c0):,}",
                 "rule_d_status": "REJECTED",
                 "rule_d_reason": " | ".join(rejection_reasons),
                 "selected_strategy": "WAIT AND SEE",
                 "volume_note": "N/A",
                 "entry_range": "-",
-                "worst_case_entry": 0,
-                "sl_price": 0,
+                "worst_case_entry": "-",
+                "sl_price": "-",
                 "max_risk_pct": "-",
                 "max_risk_status": "INVALID",
                 "targets": []
