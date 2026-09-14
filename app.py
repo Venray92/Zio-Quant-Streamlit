@@ -509,30 +509,21 @@ def get_stock_trade_plan(symbol):
         chg_val = c0 - c1
         chg_pct = (chg_val / c1) * 100
 
-        # Data 20 Hari Terakhir
+        # 1. AMBIL SUPPORT TERDEKAT (7-10 HARI TERAKHIR)
+        df_recent = df.tail(10)
+        s1_ekor = round_to_bei_tick(float(df_recent['Low'].min()))
+        s1_body = round_to_bei_tick(float(df_recent[['Open', 'Close']].min().min()))
+
+        # 2. AMBIL RESISTANT TERDEKAT (20 HARI TERAKHIR)
         df_20 = df.tail(20)
-        
-        # High & Body Max (Resist 1)
         r1_ekor = round_to_bei_tick(float(df_20['High'].max()))
         r1_body = round_to_bei_tick(float(df_20[['Open', 'Close']].max().max()))
-        
-        # Low & Body Min (Support 1)
-        s1_ekor = round_to_bei_tick(float(df_20['Low'].min()))
-        s1_body = round_to_bei_tick(float(df_20[['Open', 'Close']].min().min()))
 
-        # Mundur 21-40 Hari (Resist 2)
-        df_prev_20 = df.iloc[-40:-20] if len(df) >= 40 else df_20
-        r2_ekor = round_to_bei_tick(float(df_prev_20['High'].max()))
-        
-        if r2_ekor <= r1_ekor:
-            r2_ekor = add_ticks(r1_ekor, 8)
-
-        # --- LOGIKA BARU SESUAI INSTRUKSI ---
-        # 1. Cek Jarak Ekor ke Body (Support 1)
+        # 3. PENETAPAN AREA BELI (BOW) & STOP LOSS
+        # Jarak Ekor ke Body di Support Terdekat
         tick_sz = get_tick_size(s1_body)
         gap_ticks = int((s1_body - s1_ekor) / tick_sz)
         
-        # Jika wick terlalu panjang (> 5 tick), area beli dibatasi dari Body - 5 Tick sampai Body
         if gap_ticks > 5:
             buy_range_low = subtract_ticks(s1_body, 5)
             buy_range_high = s1_body
@@ -540,18 +531,24 @@ def get_stock_trade_plan(symbol):
             buy_range_low = s1_ekor
             buy_range_high = s1_body
 
-        # 2. Stop Loss Dipatok 1-2 Tick DI BAWAH WICK TERBAWAH
-        sl_price = subtract_ticks(s1_ekor, 1)
+        # SL dipatok 2 tick di bawah Ekor Terdekat (Misal 545 -> 535)
+        sl_price = subtract_ticks(s1_ekor, 2)
 
-        # Target Penjual & Keterangan Sumber
-        tp1 = min(r1_body, r1_ekor)
-        tp1_src = "High Body 20H"
-        
-        tp2 = max(r1_body, r1_ekor)
-        tp2_src = "High Ekor 20H"
-        
-        tp3 = r2_ekor
-        tp3_src = "Resist Major (40H)"
+        # 4. PENETAPAN TP BERJARAK MINIMAL 10 TICK
+        # TP 1 = High Terdekat (Ekor/Body Max 20H)
+        tp1 = max(r1_body, r1_ekor)
+        tp1_src = "High 20H Terdekat"
+
+        # TP 2 = Minimal TP1 + 10 Tick
+        tp2_candidate = add_ticks(tp1, 10)
+        df_40 = df.tail(40)
+        r2_major = round_to_bei_tick(float(df_40['High'].max()))
+        tp2 = max(tp2_candidate, r2_major)
+        tp2_src = "Resist Major / +10 Tick"
+
+        # TP 3 = Minimal TP2 + 10 Tick
+        tp3 = add_ticks(tp2, 10)
+        tp3_src = "Proyeksi (+10 Tick)"
 
         plan_type = "BUY ON WEAKNESS (BOW)"
 
