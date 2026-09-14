@@ -490,16 +490,14 @@ def run_screener(tickers):
     if not df_dc.empty: df_dc = df_dc.sort_values(by="Score", ascending=True).reset_index(drop=True)
     return df_gc, df_dc
 
+# 7.trade plan
+
 @st.cache_data(ttl=600)
 def get_stock_trade_plan(symbol):
     clean_code = symbol.replace('IDX:', '')
     if symbol in ["^JKSE", "IDX:COMPOSITE"]:
-        return {
-            "is_ihsg": True, "price": "-", "plan_type": "-", "is_breakdown": False,
-            "buy_range": "-", "sl_price": "-", "tp1": "-", "tp2": "-", "tp3": "-",
-            "risk_pct": "-", "reward_pct_1": "-", "reward_pct_2": "-", "reward_pct_3": "-",
-            "rr_1": 0, "rr_2": 0, "rr_3": 0, "risk_val": "-", "reward_val_2": "-"
-        }
+        return {"is_ihsg": True}
+        
     try:
         yf_symbol = f"{clean_code}.JK"
         df = yf.download(yf_symbol, period="90d", interval="1d", progress=False)
@@ -511,7 +509,7 @@ def get_stock_trade_plan(symbol):
         chg_val = c0 - c1
         chg_pct = (chg_val / c1) * 100
 
-        # 1. AMBIL DATA 20 HARI TERAKHIR (GELOMBANG 1)
+        # Data 20 Hari Terakhir
         df_20 = df.tail(20)
         
         # High & Body Max (Resist 1)
@@ -522,48 +520,42 @@ def get_stock_trade_plan(symbol):
         s1_ekor = round_to_bei_tick(float(df_20['Low'].min()))
         s1_body = round_to_bei_tick(float(df_20[['Open', 'Close']].min().min()))
 
-        # 2. AMBIL DATA 21-40 HARI LALU (GELOMBANG 2 / MUNDUR LAGI)
+        # Mundur 21-40 Hari (Resist 2)
         df_prev_20 = df.iloc[-40:-20] if len(df) >= 40 else df_20
         r2_ekor = round_to_bei_tick(float(df_prev_20['High'].max()))
-        r2_body = round_to_bei_tick(float(df_prev_20[['Open', 'Close']].max().max()))
-        s2_ekor = round_to_bei_tick(float(df_prev_20['Low'].min()))
-        s2_body = round_to_bei_tick(float(df_prev_20[['Open', 'Close']].min().min()))
-
-        # Jika R2 ternyata lebih rendah dari R1, naikkan R2 ke atas R1 pakai proyeksi tick
+        
         if r2_ekor <= r1_ekor:
             r2_ekor = add_ticks(r1_ekor, 8)
-            r2_body = add_ticks(r1_body, 6)
 
-        # 3. KONDISI EKSEKUSI STRATEGI
-        # Jarak Support 1 Ekor & Body
-        s1_min = min(s1_ekor, s1_body)
-        s1_max = max(s1_ekor, s1_body)
+        # --- LOGIKA BARU SESUAI INSTRUKSI ---
+        # 1. Cek Jarak Ekor ke Body (Support 1)
+        tick_sz = get_tick_size(s1_body)
+        gap_ticks = int((s1_body - s1_ekor) / tick_sz)
         
-        # Jarak Resist 1 Ekor & Body
-        r1_min = min(r1_ekor, r1_body)
-        r1_max = max(r1_ekor, r1_body)
+        # Jika wick terlalu panjang (> 5 tick), area beli dibatasi dari Body - 5 Tick sampai Body
+        if gap_ticks > 5:
+            buy_range_low = subtract_ticks(s1_body, 5)
+            buy_range_high = s1_body
+        else:
+            buy_range_low = s1_ekor
+            buy_range_high = s1_body
 
-        # Tentukan Strategi berdasarkan Posisi Harga Terakhir (c0)
-        if c0 >= (r1_max * 0.98): # Mendekati atau Tembus Resist 1
-            plan_type = "BUY ON BREAKOUT (BOB)"
-            buy_range_low = r1_min
-            buy_range_high = r1_max
-            sl_price = subtract_ticks(s1_max, 2)
-            
-            tp1 = r2_body
-            tp2 = r2_ekor
-            tp3 = add_ticks(r2_ekor, 6)
-        else: # Lebih dekat ke Support / Retracement
-            plan_type = "BUY ON WEAKNESS (BOW)"
-            buy_range_low = s1_min
-            buy_range_high = s1_max
-            sl_price = subtract_ticks(s1_min, 2)
-            
-            tp1 = r1_min
-            tp2 = r1_max
-            tp3 = r2_ekor
+        # 2. Stop Loss Dipatok 1-2 Tick DI BAWAH WICK TERBAWAH
+        sl_price = subtract_ticks(s1_ekor, 1)
 
-        # 4. HITUNG RISK & REWARD
+        # Target Penjual & Keterangan Sumber
+        tp1 = min(r1_body, r1_ekor)
+        tp1_src = "High Body 20H"
+        
+        tp2 = max(r1_body, r1_ekor)
+        tp2_src = "High Ekor 20H"
+        
+        tp3 = r2_ekor
+        tp3_src = "Resist Major (40H)"
+
+        plan_type = "BUY ON WEAKNESS (BOW)"
+
+        # Hitung Risk & Reward
         entry_worst = buy_range_high
         risk_pct = round(((entry_worst - sl_price) / entry_worst) * 100, 2)
         
@@ -576,14 +568,10 @@ def get_stock_trade_plan(symbol):
         rr_3 = round(reward_pct_3 / risk_pct, 1) if risk_pct > 0 else 0
 
         risk_val = entry_worst - sl_price
-        reward_val_2 = tp2 - entry_worst
         is_breakdown = c0 < sl_price
 
         return {
             "is_ihsg": False,
-            "raw_c0": c0,
-            "chg_val": chg_val,
-            "chg_pct": chg_pct,
             "price": f"Rp {int(c0):,}",
             "plan_type": plan_type,
             "is_breakdown": is_breakdown,
@@ -592,6 +580,9 @@ def get_stock_trade_plan(symbol):
             "tp1": f"Rp {int(tp1):,}",
             "tp2": f"Rp {int(tp2):,}",
             "tp3": f"Rp {int(tp3):,}",
+            "tp1_src": tp1_src,
+            "tp2_src": tp2_src,
+            "tp3_src": tp3_src,
             "risk_pct": f"-{risk_pct}%",
             "reward_pct_1": f"+{reward_pct_1}%",
             "reward_pct_2": f"+{reward_pct_2}%",
@@ -599,17 +590,10 @@ def get_stock_trade_plan(symbol):
             "rr_1": rr_1,
             "rr_2": rr_2,
             "rr_3": rr_3,
-            "risk_val": f"Rp {int(risk_val):,}",
-            "reward_val_2": f"Rp {int(reward_val_2):,}",
-            "entry_worst": entry_worst
+            "risk_val": f"Rp {int(risk_val):,}"
         }
-    except Exception as e:
-        return {
-            "is_ihsg": False, "price": "-", "plan_type": "-", "is_breakdown": False,
-            "buy_range": "-", "sl_price": "-", "tp1": "-", "tp2": "-", "tp3": "-",
-            "risk_pct": "-", "reward_pct_1": "-", "reward_pct_2": "-", "reward_pct_3": "-",
-            "rr_1": 0, "rr_2": 0, "rr_3": 0, "risk_val": "-", "reward_val_2": "-"
-        }
+    except Exception:
+        return {"is_ihsg": False}
 
 # 8. Header Navigation
 col_brand, col_space, col_menu = st.columns([3, 3.7, 2.3])
@@ -757,16 +741,15 @@ with col_right:
         """
         st.components.v1.html(tradingview_html, height=540)
 
-    # VIEW 2: TRADE PLAN MODUL
+  # VIEW 2: TRADE PLAN MODUL
     elif st.session_state.view_mode == "trade_plan":
         tp = get_stock_trade_plan(active_symbol)
         
         if tp["is_ihsg"]:
-            st.info("ℹ️ **Indeks IHSG (Composite)** tidak memiliki Trade Plan individual. Silakan pilih salah satu saham dari watchlist sebelah kiri.")
+            st.info("ℹ️ Indeks IHSG tidak memiliki Trade Plan individual.")
         else:
-            # BLOCK 1: STATUS CHART
+            # BLOCK 1: STATUS
             st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-bottom: 8px;'>🎯 1. STATUS CHART & EKSEKUSI</p>", unsafe_allow_html=True)
-            
             sc1, sc2 = st.columns(2)
             with sc1:
                 st.markdown(f"""
@@ -777,21 +760,16 @@ with col_right:
                     </div>
                 """, unsafe_allow_html=True)
             with sc2:
-                card_style = "tp-card-red" if tp["is_breakdown"] else "tp-card-green"
-                badge_style = "tp-badge-red" if tp["is_breakdown"] else "tp-badge-green"
-                status_text = "⚠️ HIGH RISK / BREAKDOWN" if tp["is_breakdown"] else f"🟢 {tp['plan_type']}"
-                
                 st.markdown(f"""
-                    <div class="{card_style}">
+                    <div class="tp-card-green">
                         <p style="color: #64748B; font-size: 11px; margin: 0;">Rekomendasi Rencana</p>
                         <h3 style="color: #FFFFFF; margin: 4px 0; font-weight: 700;">{tp['plan_type']}</h3>
-                        <span class="{badge_style}">{status_text}</span>
+                        <span class="tp-badge-green">🟢 {tp['plan_type']}</span>
                     </div>
                 """, unsafe_allow_html=True)
 
-            # BLOCK 2: PARAMETER PRICE TARGET & RISK
+            # BLOCK 2: PARAMETER HARGAM (SUDAH DISUASIKAN)
             st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 10px; margin-bottom: 8px;'>📊 2. HARGA & PARAMETER TRADE PLAN</p>", unsafe_allow_html=True)
-            
             pc1, pc2, pc3 = st.columns(3)
             with pc1:
                 st.markdown(f"""
@@ -811,23 +789,23 @@ with col_right:
                     </div>
                 """, unsafe_allow_html=True)
 
+            # DIUBAH DARI TARGET 2 MENJADI RISK TO REWARD RATIO (TP1)
             with pc3:
                 st.markdown(f"""
                     <div class="tp-card-green">
-                        <p style="color: #00E676; font-size: 11px; margin: 0; font-weight: bold;">TARGET 2 (MAIN TP)</p>
-                        <h3 style="color: #FFFFFF; margin: 4px 0;">{tp['tp2']}</h3>
-                        <p style="color: #00E676; font-size: 11px; margin: 0;">Potensi: {tp['reward_pct_2']} (R:R {tp['rr_2']})</p>
+                        <p style="color: #00E676; font-size: 11px; margin: 0; font-weight: bold;">RISK TO REWARD (TP 1)</p>
+                        <h3 style="color: #FFFFFF; margin: 4px 0;">1 : {tp['rr_1']}</h3>
+                        <p style="color: #00E676; font-size: 11px; margin: 0;">Potensi TP1: {tp['reward_pct_1']}</p>
                     </div>
                 """, unsafe_allow_html=True)
 
-            # BLOCK 3: DETAIL TARGET PENJUALAN
+            # BLOCK 3: TARGET WITH SOURCE (SUDAH DISESUAIKAN)
             st.markdown("<p style='font-size: 13px; color: #00E676; font-weight: bold; margin-top: 10px; margin-bottom: 8px;'>🎯 3. SCALING OUT TARGET (TP1, TP2, TP3)</p>", unsafe_allow_html=True)
-            
             tc1, tc2, tc3 = st.columns(3)
             with tc1:
                 st.markdown(f"""
                     <div class="tp-card">
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 1 (Conservative)</p>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 1 ({tp['tp1_src']})</p>
                         <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp1']}</h4>
                         <span class="tp-badge-green">{tp['reward_pct_1']} (R:R {tp['rr_1']})</span>
                     </div>
@@ -835,7 +813,7 @@ with col_right:
             with tc2:
                 st.markdown(f"""
                     <div class="tp-card">
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 2 (Moderate)</p>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 2 ({tp['tp2_src']})</p>
                         <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp2']}</h4>
                         <span class="tp-badge-green">{tp['reward_pct_2']} (R:R {tp['rr_2']})</span>
                     </div>
@@ -843,7 +821,7 @@ with col_right:
             with tc3:
                 st.markdown(f"""
                     <div class="tp-card">
-                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 3 (Aggressive)</p>
+                        <p style="color: #94A3B8; font-size: 11px; margin: 0;">TP 3 ({tp['tp3_src']})</p>
                         <h4 style="color: #FFFFFF; margin: 2px 0;">{tp['tp3']}</h4>
                         <span class="tp-badge-green">{tp['reward_pct_3']} (R:R {tp['rr_3']})</span>
                     </div>
